@@ -7,7 +7,7 @@ Controlling artifact for Codex Role-C execution. Directs Codex to add a new §2.
 ```
 Role: Claude Code
 Turn Type: Documentation-update package
-Turn issued against HEAD: <PKG_COMMIT_SHA> (development; the commit that first adds this handoff — T29 artifact-presence probe resolves here and at every later commit)
+Turn issued against HEAD: 16b0778a68b74612f4e39d48dbb7d490baa5762b (development; the commit that first adds this handoff — T29 artifact-presence probe resolves here and at every later commit)
 Grounding Mode: Targeted Current-Turn Grounding
 Pass: Pass 4
 Sub-phase Track: N/A
