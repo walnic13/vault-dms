@@ -64,6 +64,15 @@ Filename / location: `spec/VAULT_DMS_API_SPEC.md`.
 | Primary reference | `reporting_probe_dms_connection`. **Delta:** no hardcoded target site, **no DB / no `set_config`** (stateless); the probe is purely the OBO exchange + a delegated Graph call. |
 | Status | `proposed` |
 
+### §2.6 `dms_list_sites` — enumerate the entire DMS (all accessible sites)
+| Field | Value |
+|-------|-------|
+| Route | `GET /api/dms_list_sites` (no parameters) |
+| Purpose | Enumerate **all** SharePoint sites the caller can access (Graph `GET /v1.0/sites?search=*`, paginated via `@odata.nextLink`), filtered to the tenant host (`vaulttax.sharepoint.com`) root sites, each verified by a delegated `/sites/{id}/drive` probe. The tenant-wide root source for Origin's DMS mirror — replaces the curated-registry visibility model. |
+| Success | `{ data: { sites: [ { site_id, site_name, web_url } ] } }` sorted by name then id. |
+| Primary reference | Composite (Walter-authorized): `reporting_search_clients` (site-search + tenant/root filter + `/drive` probe) and `reporting_dms_tree` (`@odata.nextLink` pagination). **Delta:** no `q` parameter — the wildcard `*` enumerates; no registry union. Enumeration is delegated and security-trimmed to the caller. |
+| Status | `deployed` |
+
 ---
 
 ## §3 Boundary
