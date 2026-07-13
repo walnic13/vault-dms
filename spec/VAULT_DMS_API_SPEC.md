@@ -32,8 +32,8 @@ Filename / location: `spec/VAULT_DMS_API_SPEC.md`.
 |-------|-------|
 | Route | `GET /api/dms_tree?siteId=<10..200, no % or _>&parentItemId=<optional, 5..200>` |
 | Purpose | List the immediate children — **both folders and files** — of a drive node under a site, as the signed-in user; `parentItemId` omitted → the drive root's children. Paginates via `@odata.nextLink`. |
-| Success | `{ data: { tree: { site_id, drive_id, parent: { item_id, name, type:"folder" }, children: [ { item_id, name, type:"folder"\|"file", has_children?, size?, mime_type?, web_url? } ] } } }` (folders sorted before/with files by name). |
-| Primary reference | `reporting_dms_tree`. **Delta (BINDING mirror requirement):** the child projection includes **files** (`item.file`), not folders only — `type` discriminates `folder`/`file`; file rows carry `size`/`mime_type`. No registry gate (site authority is delegated Graph). Site label from Graph `/sites/{id}`. |
+| Success | `{ data: { dms_tree: { site_id, drive_id, parent: { item_id, name, type:"folder" }, children: [ { item_id, name, type:"folder"\|"file", size, date_modified, web_url, has_children? (folders), mime_type? (files) } ] } } }` (folders first, then files, alphabetical within each). |
+| Primary reference | `reporting_dms_tree`. **Delta (BINDING mirror requirement):** the child projection includes **files** (`item.file`), not folders only — `type` discriminates `folder`/`file`; file rows carry `size`/`mime_type`. No registry gate (site authority is delegated Graph). No site-label fetch — the caller carries the site name from dms_search_sites — so dms_tree calls no /sites/{id} endpoint. |
 | Status | `proposed` |
 
 ### §2.3 `dms_resolve_item` — resolve an item to its live Graph identity (no persistence)
