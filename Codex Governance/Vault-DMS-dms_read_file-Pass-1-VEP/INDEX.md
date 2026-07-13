@@ -2,6 +2,10 @@
 
 Controlling artifact for Codex review. Self-contained: handler under `handlers/`, deployed primary reference under `primary-reference/`.
 
+## Re-submission note (Pass-3 correction — handler changed since the prior APPROVED)
+
+The prior version of this handler was Codex-APPROVED and deployed, but its **Pass-3 golden curl returned HTTP 400** on a valid input: SharePoint **drive ids are base64url and contain `_`** (e.g. `b!…TYd_oLbnH5nU`), and the handler's `driveId`/`itemId` validation rejected `%` and `_` — a rule copied from the *reporting* handlers where it is a **SQL `LIKE`-wildcard injection defense**. Vault DMS is **stateless (no SQL)**, so that defense is inapplicable and wrongly rejected valid ids. **Fix:** `isValidDriveIdFormat`/`isValidItemIdFormat` now use a positive charset allow-list `^[A-Za-z0-9!,._-]+$` (+ the length bounds) instead of the `%/_` rejection; the two 400-message strings were updated to match. No other change. This VEP is re-submitted for Codex re-review of the corrected handler before redeploy.
+
 ## Grounding Conformance Receipt
 
 ```
@@ -68,7 +72,7 @@ Sub-phase Track: P5
 | `const { Pool } = require("pg")` + pool | present in reference | **REMOVED (stateless)** | Golden Handler §3; no-DB §1; DR-D2 |
 | `sendJson`/`sendBinary`/`nowIso`/`errorBody`/`getPrincipal`/`getClaimValue`/`parseJsonSafe`/`buildKnownError`/`requestText`/`requestBinary`/`getBearerTokenFromAuthorization`/`getOboInputToken`/`exchangeGraphToken`/`graphGetContentRedirect`/`fetchDownloadPayload`/`buildAttachmentDisposition` | same | EXACT | frozen Family-B / download helper block (incl. the reference's 400/401→401, 403→403 exchange mapping) |
 | `isUuid` (validates the `id` DB row uuid) | present in reference | REMOVED (no DB row) | replaced by driveId/itemId format validation |
-| `isValidDriveIdFormat`/`isValidItemIdFormat` + `DRIVE_ID_*`/`ITEM_ID_*` constants | (new; mirrors the format-validation idiom of reporting_dms_tree `isValidSiteIdFormat`) | ALLOWED DELTA | endpoint-specific input validation (Golden Handler §4); driveId/itemId are opaque Graph ids, not UUIDs |
+| `isValidDriveIdFormat`/`isValidItemIdFormat` (charset allow-list `^[A-Za-z0-9!,._-]+$` + length) + `DRIVE_ID_*`/`ITEM_ID_*` constants | (new; adapts reporting_dms_tree `isValidSiteIdFormat`) | ALLOWED DELTA | endpoint-specific validation (Golden Handler §4); driveId/itemId are opaque Graph ids, not UUIDs. The reference's "no % or _" is a SQL-LIKE-wildcard defense; Vault DMS is stateless (no SQL) so it is dropped — base64url drive ids contain `_`, so a positive Graph-id charset allow-list is used instead (Pass-3 correction; see Re-submission note) |
 | OPTIONS handling, oid extraction, oboInput extraction | same | EXACT | frozen auth pattern |
 | `pool.connect`/`BEGIN`/`set_config`; `SELECT drive_id, dms_item_id FROM reporting_folder_dms_links WHERE id=$1` + 404; `COMMIT` | present in reference | **REMOVED (stateless)** | Golden Handler §3; no-DB §1; DR-D2 (driveId+itemId supplied directly per API Spec §2.4) |
 | `exchangeGraphToken` → `graphGetContentRedirect(driveId,itemId)` → `fetchDownloadPayload` → `sendBinary` with Content-Type/Content-Disposition/Content-Length | same | EXACT | same Graph `/content` endpoint + binary stream (Golden Handler §4) |

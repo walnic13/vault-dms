@@ -73,20 +73,26 @@ function getClaimValue(principal, claimTypes) {
   return null;
 }
 
+// Microsoft Graph drive ids are base64url ("b!" + [A-Za-z0-9_-]) and item ids are
+// base32-style; both are opaque and are encodeURIComponent'd into the Graph path.
+// Validation is a length bound + a positive allow-list of the characters real Graph
+// ids use (alphanumerics plus ! , . _ -). NOTE: the reporting handlers' "no % or _"
+// rule is a SQL-LIKE-wildcard injection defense; Vault DMS is stateless (no SQL), so
+// that rule is dropped here — and it wrongly rejected the "_" in valid drive ids.
+const GRAPH_ID_CHARSET = /^[A-Za-z0-9!,._-]+$/;
+
 function isValidDriveIdFormat(value) {
   if (typeof value !== "string") return false;
   const trimmed = value.trim();
   if (trimmed.length < DRIVE_ID_MIN_LENGTH || trimmed.length > DRIVE_ID_MAX_LENGTH) return false;
-  if (trimmed.includes("%") || trimmed.includes("_")) return false;
-  return true;
+  return GRAPH_ID_CHARSET.test(trimmed);
 }
 
 function isValidItemIdFormat(value) {
   if (typeof value !== "string") return false;
   const trimmed = value.trim();
   if (trimmed.length < ITEM_ID_MIN_LENGTH || trimmed.length > ITEM_ID_MAX_LENGTH) return false;
-  if (trimmed.includes("%") || trimmed.includes("_")) return false;
-  return true;
+  return GRAPH_ID_CHARSET.test(trimmed);
 }
 
 function parseJsonSafe(raw) {
@@ -366,7 +372,7 @@ module.exports = async function (context, req) {
       400,
       errorBody(
         "INVALID_REQUEST",
-        "Query parameter 'driveId' is required and must be 10..300 characters with no '%' or '_'.",
+        "Query parameter 'driveId' is required, 10..300 characters, and may contain only letters, digits, and ! , . _ -.",
         400
       )
     );
@@ -381,7 +387,7 @@ module.exports = async function (context, req) {
       400,
       errorBody(
         "INVALID_REQUEST",
-        "Query parameter 'itemId' is required and must be 5..200 characters with no '%' or '_'.",
+        "Query parameter 'itemId' is required, 5..200 characters, and may contain only letters, digits, and ! , . _ -.",
         400
       )
     );
