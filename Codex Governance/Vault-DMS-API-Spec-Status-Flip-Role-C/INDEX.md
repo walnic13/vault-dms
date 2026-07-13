@@ -7,7 +7,7 @@ Controlling artifact for Codex Role-C execution. Directs Codex to flip the four 
 ```
 Role: Claude Code
 Turn Type: Documentation-update package
-Turn issued against HEAD: <PKG_COMMIT> (development; the commit that first adds this handoff — T29 artifact-presence probe resolves here and at every later commit)
+Turn issued against HEAD: e49f36d14faefbeb76b2120ff5ef3e63be0b092b (development; the commit that first adds this handoff — T29 artifact-presence probe resolves here and at every later commit)
 Grounding Mode: Targeted Current-Turn Grounding
 Pass: Pass 4
 Sub-phase Track: N/A
@@ -67,7 +67,9 @@ Command: `node tools/lint_microstep_submission.mjs "Codex Governance/Vault-DMS-A
 PASS block (verbatim):
 
 ```
-<lint output pasted here after run>
+$ node tools/lint_microstep_submission.mjs "Codex Governance/Vault-DMS-API-Spec-Status-Flip-Role-C/INDEX.md" --repo-root .
+PASS  <repo-root>/Codex Governance/Vault-DMS-API-Spec-Status-Flip-Role-C/INDEX.md
+exit code: 0
 ```
 
 Codex: re-run the command above from the vault-dms repo root; expect `PASS` and exit `0` (T24).
