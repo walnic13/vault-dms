@@ -7,7 +7,7 @@ Controlling artifact for Codex review. Self-contained: handler under `handlers/`
 ```
 Role: Claude Code
 Turn Type: Verified Evidence Pack (backend plan)
-Turn issued against HEAD: <PKG_COMMIT> (development; the commit that first adds this package — T29 artifact-presence probe resolves here and at every later commit)
+Turn issued against HEAD: fd0285889014c46fb334c662843b1c3d384517f3 (development; the commit that first adds this package — T29 artifact-presence probe resolves here and at every later commit)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: P5
@@ -125,7 +125,9 @@ Command: `node tools/lint_microstep_submission.mjs "Codex Governance/Vault-DMS-d
 PASS block (verbatim):
 
 ```
-<lint output pasted here after run>
+$ node tools/lint_microstep_submission.mjs "Codex Governance/Vault-DMS-dms_tree-Pass-1-VEP/INDEX.md" --repo-root .
+PASS  <repo-root>/Codex Governance/Vault-DMS-dms_tree-Pass-1-VEP/INDEX.md
+exit code: 0
 ```
 
 Codex: re-run the command above from the vault-dms repo root; expect `PASS` and exit `0` (T24).
