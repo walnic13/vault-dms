@@ -42,7 +42,7 @@ Filename / location: `spec/VAULT_DMS_API_SPEC.md`.
 | Route | `POST /api/dms_resolve_item` `{ siteId, dmsItemId }` |
 | Purpose | Resolve a site + drive item to its live Graph identity, for a consuming app to anchor in its own store. **Read-only — writes nothing.** |
 | Success | `{ data: { item: { site_id, drive_id, drive_name, item_id, name, type:"folder"\|"file", web_url } } }` |
-| Primary reference | `reporting_resolve_dms_folder` (the read half: Graph `/sites/{id}`, `/sites/{id}/drive`, `/drives/{id}/items/{itemId}`). **Delta:** the `reporting_folders` / `reporting_folder_dms_links` INSERTs and the registry gate are **removed** — Vault DMS returns identity only; the consuming app owns persistence. |
+| Primary reference | `reporting_resolve_dms_folder` (the read half: Graph `/sites/{id}/drive`, `/drives/{id}/items/{itemId}`). **Delta:** the `reporting_folders` / `reporting_folder_dms_links` INSERTs, the SAVEPOINT/23505 race-recovery, and the registry gate are **removed** — Vault DMS returns identity only; the consuming app owns persistence. Resolves a folder **or** a file (the reference resolved folders only); `type` discriminates. |
 | Status | `proposed` |
 
 ### §2.4 `dms_read_file` — read a file's bytes
