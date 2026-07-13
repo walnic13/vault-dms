@@ -11,7 +11,7 @@ The prior version of this handler was Codex-APPROVED and deployed, but its **Pas
 ```
 Role: Claude Code
 Turn Type: Verified Evidence Pack (backend plan)
-Turn issued against HEAD: d6bc1920a75aff6a9cf36bd1c4366e0e62983365 (development; the commit that first adds this package — T29 artifact-presence probe resolves here and at every later commit)
+Turn issued against HEAD: db6df517369111b648ce657818bcf880d072327b (development; the commit carrying the corrected package — T29 artifact-presence probe resolves here and at every later commit)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: P5
