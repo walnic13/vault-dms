@@ -25,7 +25,7 @@ Filename / location: `spec/VAULT_DMS_API_SPEC.md`.
 | Purpose | Search SharePoint sites the caller can access (Graph `GET /v1.0/sites?search={q}`), filtered to the tenant host (`vaulttax.sharepoint.com`) root sites, each verified by a delegated `/sites/{id}/drive` probe. |
 | Success | `{ data: { sites: [ { site_id, site_name, web_url } ] } }` sorted by name. |
 | Primary reference | `reporting_search_clients` (the Graph `/sites?search=` fallback path). **Delta:** no registry union (Vault DMS has no registry — the Graph search IS the source). |
-| Status | `proposed` |
+| Status | `deployed` |
 
 ### §2.2 `dms_tree` — browse a site/drive tree (FILES AND FOLDERS)
 | Field | Value |
@@ -34,7 +34,7 @@ Filename / location: `spec/VAULT_DMS_API_SPEC.md`.
 | Purpose | List the immediate children — **both folders and files** — of a drive node under a site, as the signed-in user; `parentItemId` omitted → the drive root's children. Paginates via `@odata.nextLink`. |
 | Success | `{ data: { dms_tree: { site_id, drive_id, parent: { item_id, name, type:"folder" }, children: [ { item_id, name, type:"folder"\|"file", size, date_modified, web_url, has_children? (folders), mime_type? (files) } ] } } }` (folders first, then files, alphabetical within each). |
 | Primary reference | `reporting_dms_tree`. **Delta (BINDING mirror requirement):** the child projection includes **files** (`item.file`), not folders only — `type` discriminates `folder`/`file`; file rows carry `size`/`mime_type`. No registry gate (site authority is delegated Graph). No site-label fetch — the caller carries the site name from dms_search_sites — so dms_tree calls no /sites/{id} endpoint. |
-| Status | `proposed` |
+| Status | `deployed` |
 
 ### §2.3 `dms_resolve_item` — resolve an item to its live Graph identity (no persistence)
 | Field | Value |
@@ -43,7 +43,7 @@ Filename / location: `spec/VAULT_DMS_API_SPEC.md`.
 | Purpose | Resolve a site + drive item to its live Graph identity, for a consuming app to anchor in its own store. **Read-only — writes nothing.** |
 | Success | `{ data: { item: { site_id, drive_id, drive_name, item_id, name, type:"folder"\|"file", web_url } } }` |
 | Primary reference | `reporting_resolve_dms_folder` (the read half: Graph `/sites/{id}/drive`, `/drives/{id}/items/{itemId}`). **Delta:** the `reporting_folders` / `reporting_folder_dms_links` INSERTs, the SAVEPOINT/23505 race-recovery, and the registry gate are **removed** — Vault DMS returns identity only; the consuming app owns persistence. Resolves a folder **or** a file (the reference resolved folders only); `type` discriminates. |
-| Status | `proposed` |
+| Status | `deployed` |
 
 ### §2.4 `dms_read_file` — read a file's bytes
 | Field | Value |
@@ -53,7 +53,7 @@ Filename / location: `spec/VAULT_DMS_API_SPEC.md`.
 | Success | Raw binary body (HTTP 200) with `Content-Type`, `Content-Disposition`, `Content-Length` headers. |
 | Primary reference | `reporting_download_dms_item` (the `graphGetContentRedirect` + binary-stream pattern). **Delta:** takes **`driveId`+`itemId` directly** (from a prior `dms_tree`/`dms_resolve_item`) instead of resolving a `reporting_folder_dms_links` row id via the DB — Vault DMS is stateless, so there is no DB lookup. |
 | Note | Whether v1 streams bytes (as above) or instead mints a short-lived read SAS is an open item (architecture §9.1); the reference pattern is the byte-stream. |
-| Status | `proposed` |
+| Status | `deployed` |
 
 ### §2.5 `dms_probe_connection` — delegated Graph health check
 | Field | Value |
