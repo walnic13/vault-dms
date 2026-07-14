@@ -7,7 +7,7 @@ Plan/ratification VEP. Ratifies the federated `dmsApp/DmsBrowser` remote — a *
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: 1f618b0 (development; updated to the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit)
+Turn issued against HEAD: 027fcce (development; updated to the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
