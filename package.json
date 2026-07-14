@@ -1,7 +1,25 @@
 {
   "name": "vault-dms",
-  "version": "1.0.0",
-  "description": "Vault DMS — a stateless mirror gateway that surfaces the tenant's SharePoint DMS inside Vault Origin via delegated Microsoft Graph (OBO). No database; SharePoint is the system of record. All Vault apps consume the DMS through Origin.",
-  "scripts": {},
-  "dependencies": {}
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Vault DMS — federated DMS file-browser micro-frontend (dmsApp/DmsBrowser); a 1/10-rail-only remote mounted into Vault Origin and other apps (Sigma). Backend gateway lives in api/ (func-dms).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@azure/msal-browser": "^3.10.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@originjs/vite-plugin-federation": "^1.4.1",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.2"
+  }
 }

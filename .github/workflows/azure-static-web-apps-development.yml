@@ -1,0 +1,57 @@
+name: Azure Static Web Apps CI/CD (development)
+
+on:
+  push:
+    branches:
+      - development
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - development
+
+jobs:
+  build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy Job
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      # Bake VITE_* vars at build time (Settings -> Secrets and variables -> Actions).
+      # Vault DMS FE reads VITE_DMS_API_BASE_URL (func-dms) + Entra auth vars. Safe if a secret is unset (resolves empty).
+      - name: Create .env for Vite build (from GitHub Secrets)
+        shell: bash
+        run: |
+          cat > .env <<EOF
+          VITE_DMS_API_BASE_URL=https://vaultgpt-func-dms.azurewebsites.net
+          VITE_ENTRA_CLIENT_ID=${{ secrets.VITE_ENTRA_CLIENT_ID }}
+          VITE_ENTRA_TENANT_ID=${{ secrets.VITE_ENTRA_TENANT_ID }}
+          VITE_ENTRA_AUTHORITY=${{ secrets.VITE_ENTRA_AUTHORITY }}
+          VITE_ENTRA_API_SCOPE=${{ secrets.VITE_ENTRA_API_SCOPE }}
+          EOF
+
+      # Oryx builds (npm install + npm run build) in app_location and deploys the output.
+      - name: Deploy to Azure Static Web Apps (dev)
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: "upload"
+          app_location: "/"       # Vault DMS FE lives here (repo also holds api/)
+          api_location: ""          # func-dms deploys separately (not SWA-managed)
+          output_location: "dist"   # Vite output (web/dist)
+          production_branch: "development"
+
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: "close"
+          production_branch: "development"
