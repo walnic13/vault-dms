@@ -166,11 +166,12 @@ export interface DmsBrowserProps {
   onPickFolder?: (pick: { siteId: string; itemId: string; name: string }) => void;
 }
 
-function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder }: {
+function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder, showHeader }: {
   getAccessToken: ShellTokenProvider;
   onOpenFile: (n: DmsFileNode) => void;
   pickMode: boolean;
   onPickFolder?: (p: { siteId: string; itemId: string; name: string }) => void;
+  showHeader: boolean;
 }) {
   const [clients, setClients] = useState<DmsClient[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -184,10 +185,14 @@ function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder }: {
 
   return (
     <div className="flex flex-col h-full min-h-0 font-sans text-theo-ink">
-      <div className="flex items-center gap-1.5 px-2 py-2 flex-shrink-0">
-        <Database className="w-3.5 h-3.5 text-theo-ink3 flex-shrink-0" />
-        <span className="flex-1 text-left text-[10px] font-semibold uppercase tracking-widest text-theo-ink3">Vault Files</span>
-      </div>
+      {/* The browser's own header shows only when standalone; when hosted (navSlot present) the host
+          shell provides the collapsible "Vault Files" section header, so we suppress this one. */}
+      {showHeader && (
+        <div className="flex items-center gap-1.5 px-2 py-2 flex-shrink-0">
+          <Database className="w-3.5 h-3.5 text-theo-ink3 flex-shrink-0" />
+          <span className="flex-1 text-left text-[10px] font-semibold uppercase tracking-widest text-theo-ink3">Vault Files</span>
+        </div>
+      )}
       <div className="flex-1 min-h-0 overflow-y-auto px-1 pb-2 text-sm" data-testid="dms-browser">
         {loading && (
           <div className="flex items-center gap-1.5 text-xs text-theo-ink3 px-2 py-2">
@@ -225,7 +230,7 @@ export default function DmsBrowser({ navSlot, getAccessToken, onOpenFile, pickMo
     if (onOpenFile) { onOpenFile(n); return; }
     if (n.webUrl) window.open(n.webUrl, '_blank', 'noopener,noreferrer');
   };
-  const tree = <Tree getAccessToken={getAccessToken} onOpenFile={open} pickMode={!!pickMode} onPickFolder={onPickFolder} />;
+  const tree = <Tree getAccessToken={getAccessToken} onOpenFile={open} pickMode={!!pickMode} onPickFolder={onPickFolder} showHeader={!navSlot} />;
 
   // Hosted: the shell owns the collapsible/draggable rail; we portal the tree into its navSlot.
   if (navSlot) return createPortal(tree, navSlot);
