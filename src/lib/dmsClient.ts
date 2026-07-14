@@ -1,86 +1,103 @@
-// DMS browse client — authenticated HTTP against the deployed func-dms gateway (VITE_DMS_API_BASE_URL).
-// Mounted (in Origin / Sigma) the host injects getAccessToken; standalone (dms-dev harness) a minimal
-// MSAL provider supplies it. Mirrors the vault-origin dmsMirrorClient idiom: await getAccessToken() →
-// single Authorization: Bearer header → fetch func-dms → graceful []/null on any non-2xx (warn, no
-// body/token logging). This is the DMS app calling its OWN backend (func-dms), OBO as the signed-in
-// user; SharePoint stays the authority (security-trimmed).
+// DMS browse client — verbatim port of vault-origin/src/shell/appHost/dmsMirrorClient.ts (the
+// authoritative browse logic). BROWSE endpoints hit the stateless func-dms gateway
+// (VITE_DMS_API_BASE_URL): listDmsSites → dms_list_sites (VAULT_DMS_API_SPEC §2.6, entire tenant
+// DMS, permission-trimmed per user; clientLabel = site_name) and getDmsTree → dms_tree (§2.2,
+// folders AND files). Single Authorization: Bearer (the signed-in user's OBO input token); the
+// backend does the delegated Graph OBO server-side; no Graph scope on the FE; no body/token logged.
 
 export type ShellTokenProvider = (scope?: string) => Promise<string | null>;
 
-export interface DmsSite { siteId: string; name: string; webUrl: string; driveId?: string; }
-export interface DmsNode {
+export interface DmsClient {
+  clientKey: string; // ← site_id
+  clientLabel: string; // ← site_name (the friendly name; NEVER web_url)
+}
+
+export interface DmsFolderNode {
+  kind: 'folder';
   itemId: string;
   name: string;
-  type: 'folder' | 'file';
-  driveId?: string;
-  webUrl?: string;
+  hasChildren: boolean;
+}
+
+export interface DmsFileNode {
+  kind: 'file';
+  itemId: string;
+  name: string;
+  webUrl: string;
   mimeType?: string;
-  size?: number;
-  dateModified?: string;
-  hasChildren?: boolean;
 }
 
-export interface DmsClient {
-  listSites(): Promise<DmsSite[]>;
-  getTree(siteId: string, parentItemId?: string): Promise<{ driveId: string; children: DmsNode[] }>;
-}
+export type DmsTreeNode = DmsFolderNode | DmsFileNode;
 
-function apiBase(): string | null {
-  const base = import.meta.env.VITE_DMS_API_BASE_URL;
-  if (!base) {
-    console.warn('[dmsClient] VITE_DMS_API_BASE_URL is not set — DMS calls are disabled.');
+function dmsApiBase(): string | null {
+  const baseUrl = import.meta.env.VITE_DMS_API_BASE_URL;
+  if (!baseUrl) {
+    console.warn('[DMS] VITE_DMS_API_BASE_URL not configured — DMS unavailable');
     return null;
   }
-  return String(base).replace(/\/$/, '');
+  return baseUrl;
 }
 
-export function makeDmsClient(getAccessToken: ShellTokenProvider): DmsClient {
-  async function authedFetch(path: string): Promise<any | null> {
-    const base = apiBase();
-    if (!base) return null;
-    let token: string | null = null;
-    try { token = await getAccessToken(); } catch { token = null; }
-    if (!token) { console.warn('[dmsClient] no access token — skipping call'); return null; }
-    try {
-      const res = await fetch(`${base}${path}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) { console.warn(`[dmsClient] ${path} → HTTP ${res.status}`); return null; }
-      const text = await res.text();
-      return text ? JSON.parse(text) : null;
-    } catch {
-      console.warn(`[dmsClient] ${path} failed`);
-      return null;
-    }
-  }
+// GET dms_list_sites (§2.6) — no params. clientLabel = site_name ?? site_id (never web_url).
+export async function listDmsSites(getAccessToken: ShellTokenProvider): Promise<DmsClient[]> {
+  const baseUrl = dmsApiBase();
+  if (!baseUrl) return [];
+  const token = await getAccessToken();
+  if (!token) { console.warn('[DMS] no access token — cannot list DMS sites'); return []; }
 
-  return {
-    async listSites() {
-      const j = await authedFetch('/api/dms_list_sites');
-      const raw = (j && j.data && (j.data.sites || (j.data.dms_list_sites && j.data.dms_list_sites.sites))) || [];
-      return (raw as Record<string, any>[]).map((s) => ({
-        siteId: String(s.site_id || s.siteId || s.id || ''),
-        name: String(s.name || s.display_name || s.web_url || ''),
-        webUrl: String(s.web_url || s.webUrl || ''),
-        driveId: s.drive_id || s.driveId || undefined,
-      }));
-    },
-    async getTree(siteId, parentItemId) {
-      const qs = `siteId=${encodeURIComponent(siteId)}` + (parentItemId ? `&parentItemId=${encodeURIComponent(parentItemId)}` : '');
-      const j = await authedFetch(`/api/dms_tree?${qs}`);
-      const tree = (j && j.data && j.data.dms_tree) ? j.data.dms_tree : null;
-      if (!tree) return { driveId: '', children: [] };
-      const driveId = String(tree.drive_id || tree.driveId || '');
-      const children: DmsNode[] = (Array.isArray(tree.children) ? tree.children : []).map((c: Record<string, any>) => ({
-        itemId: String(c.item_id || c.itemId || ''),
-        name: String(c.name || ''),
-        type: c.type === 'file' ? 'file' : 'folder',
-        driveId,
-        webUrl: c.web_url || c.webUrl || undefined,
-        mimeType: c.mime_type || c.mimeType || undefined,
-        size: typeof c.size === 'number' ? c.size : undefined,
-        dateModified: c.date_modified || c.dateModified || undefined,
-        hasChildren: c.has_children ?? c.hasChildren ?? undefined,
-      }));
-      return { driveId, children };
-    },
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/dms_list_sites`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
+  } catch (e) {
+    console.warn('[DMS] dms_list_sites request failed', e);
+    return [];
+  }
+  if (!res.ok) { console.warn(`[DMS] dms_list_sites returned ${res.status}`); return []; }
+
+  let json: { data?: { sites?: Array<{ site_id?: string; site_name?: string; web_url?: string }> } };
+  try { json = await res.json(); } catch { console.warn('[DMS] dms_list_sites malformed body'); return []; }
+
+  const sites = json.data?.sites ?? [];
+  return sites
+    .filter((s): s is { site_id: string; site_name?: string; web_url?: string } => !!s?.site_id)
+    .map((s) => ({ clientKey: s.site_id, clientLabel: s.site_name ?? s.site_id }));
+}
+
+// GET dms_tree (§2.2) — siteId (required) + parentItemId (optional). Folders AND files; backend
+// order preserved (folders before files, name ASC). type "file" → file node (web_url + mime_type).
+export async function getDmsTree(
+  siteId: string,
+  parentItemId: string | undefined,
+  getAccessToken: ShellTokenProvider,
+): Promise<DmsTreeNode[]> {
+  const baseUrl = dmsApiBase();
+  if (!baseUrl) return [];
+  const token = await getAccessToken();
+  if (!token) { console.warn('[DMS] no access token — cannot load DMS tree'); return []; }
+
+  const params = new URLSearchParams({ siteId });
+  if (parentItemId) params.set('parentItemId', parentItemId);
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/dms_tree?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
+  } catch (e) {
+    console.warn('[DMS] dms_tree request failed', e);
+    return [];
+  }
+  if (!res.ok) { console.warn(`[DMS] dms_tree returned ${res.status}`); return []; }
+
+  let json: {
+    data?: { dms_tree?: { children?: Array<{ item_id?: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string }> } };
   };
+  try { json = await res.json(); } catch { console.warn('[DMS] dms_tree malformed body'); return []; }
+
+  const children = json.data?.dms_tree?.children ?? [];
+  return children
+    .filter((n): n is { item_id: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string } => !!n?.item_id)
+    .map((n): DmsTreeNode =>
+      n.type === 'file'
+        ? { kind: 'file', itemId: n.item_id, name: n.name ?? '(unnamed file)', webUrl: n.web_url ?? '', mimeType: n.mime_type }
+        : { kind: 'folder', itemId: n.item_id, name: n.name ?? '(unnamed folder)', hasChildren: !!n.has_children },
+    );
 }

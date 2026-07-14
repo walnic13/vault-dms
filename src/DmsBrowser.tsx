@@ -1,169 +1,243 @@
 // DmsBrowser — the federated `dmsApp/DmsBrowser` surface. A 1/10-RAIL-ONLY file tree (no 9/10):
-// when the host provides a navSlot it PORTALS the tree in (Origin/Sigma 1/10); standalone it renders
-// inline in a rail. Browses the tenant DMS via func-dms (dms_list_sites → dms_tree) as the signed-in
-// user (OBO). File clicks are handed to the host (onOpenFile) — default opens the SharePoint web_url.
-// Origin-native styling (shared `C` tokens + SANS, Theo Sidebar idiom). First cut — the faithful
-// DmsMirror parity + picker modes land via the governed FE VEP.
-import { useEffect, useMemo, useState } from 'react';
+// portals into a host navSlot (Origin/Sigma) or renders standalone. This is a VERBATIM port of
+// vault-origin/src/shell/dms/DmsMirror.tsx (TreeNode + tree) — same Tailwind `theo-*` classes,
+// lucide-react icons, indent, and clientLabel (site_name) rendering — so it is pixel-identical to
+// Origin's "Vault Files" rail. Adapted only for the remote contract: the host injects getAccessToken
+// and handles file clicks (onOpenFile) + folder picks (pickMode/onPickFolder); the shell owns the
+// rail's collapse/drag chrome. Browses func-dms (dms_list_sites / dms_tree) OBO.
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { C, SANS } from './theme';
-import { makeDmsClient, ShellTokenProvider, DmsClient, DmsSite, DmsNode } from './lib/dmsClient';
+import {
+  ChevronDown, ChevronRight, Database, File, FileArchive, FileSpreadsheet, FileText,
+  Folder, FolderOpen, Image, Loader2, Presentation,
+} from 'lucide-react';
+import { getDmsTree, listDmsSites } from './lib/dmsClient';
+import type { ShellTokenProvider, DmsClient, DmsTreeNode, DmsFileNode } from './lib/dmsClient';
 
-const STYLE_BLOCK = `
-  .dms-scroll::-webkit-scrollbar { width: 10px; }
-  .dms-scroll::-webkit-scrollbar-thumb { background: ${C.line2}; border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }
-  .dms-row:hover { background: rgba(0,0,0,0.04); }
-`;
+// File-type icon decoration (UI only) from the file's OWN extension — a presentational hint, not
+// recognition/routing/taxonomy. (Ported verbatim from DmsMirror.)
+function fileTypeIcon(name: string): { Icon: typeof File; cls: string } {
+  const dot = name.lastIndexOf('.');
+  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
+  switch (ext) {
+    case 'xlsx': case 'xls': case 'xlsm': case 'xlsb': case 'csv':
+      return { Icon: FileSpreadsheet, cls: 'text-green-600' };
+    case 'doc': case 'docx': case 'docm': case 'rtf': case 'txt':
+      return { Icon: FileText, cls: 'text-blue-600' };
+    case 'ppt': case 'pptx': case 'pptm':
+      return { Icon: Presentation, cls: 'text-orange-500' };
+    case 'pdf':
+      return { Icon: FileText, cls: 'text-red-600' };
+    case 'png': case 'jpg': case 'jpeg': case 'gif': case 'bmp': case 'svg': case 'webp':
+      return { Icon: Image, cls: 'text-purple-500' };
+    case 'zip': case '7z': case 'rar':
+      return { Icon: FileArchive, cls: 'text-amber-600' };
+    default:
+      return { Icon: File, cls: 'text-theo-ink3' };
+  }
+}
+
+interface TreeNodeProps {
+  siteId: string;
+  itemId?: string;
+  label: string;
+  hasChildren: boolean;
+  depth: number;
+  kind: 'client' | 'folder' | 'file';
+  getAccessToken: ShellTokenProvider;
+  onOpenFile: (node: DmsFileNode) => void;
+  pickMode: boolean;
+  onPickFolder?: (pick: { siteId: string; itemId: string; name: string }) => void;
+  webUrl?: string;
+  mimeType?: string;
+}
+
+function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessToken, onOpenFile, pickMode, onPickFolder, webUrl, mimeType }: TreeNodeProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [children, setChildren] = useState<DmsTreeNode[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const loadChildren = useCallback(async () => {
+    setLoading(true);
+    const nodes = await getDmsTree(siteId, itemId, getAccessToken);
+    setChildren(nodes);
+    setLoading(false);
+  }, [siteId, itemId, getAccessToken]);
+
+  const toggle = useCallback(() => {
+    setExpanded((prev) => {
+      const next = !prev;
+      if (next && children === null && !loading) void loadChildren();
+      return next;
+    });
+  }, [children, loading, loadChildren]);
+
+  const onLabelClick = useCallback(() => {
+    if (kind === 'file') {
+      onOpenFile({ kind: 'file', itemId: itemId ?? '', name: label, webUrl: webUrl ?? '', mimeType });
+      return;
+    }
+    if (kind === 'folder' && pickMode && itemId && onPickFolder) {
+      onPickFolder({ siteId, itemId, name: label });
+      return;
+    }
+    toggle();
+  }, [kind, pickMode, onPickFolder, itemId, siteId, label, toggle, onOpenFile, webUrl, mimeType]);
+
+  const canExpand = kind === 'client' || (kind === 'folder' && hasChildren);
+  const fileIcon = kind === 'file' ? fileTypeIcon(label) : null;
+  const NodeIcon =
+    kind === 'client' ? Database
+      : kind === 'file' ? fileIcon!.Icon
+        : expanded && children?.length ? FolderOpen : Folder;
+  const iconCls =
+    kind === 'client' ? 'text-indigo-600' : kind === 'file' ? fileIcon!.cls : 'text-amber-500';
+  const selectable = kind === 'folder' && pickMode;
+  const indent = 4 + depth * 12;
+
+  return (
+    <div role="treeitem" aria-expanded={canExpand ? expanded : undefined} aria-label={label}>
+      <div
+        className={`group flex items-center gap-1 rounded-md transition-colors ${
+          selectable ? 'hover:bg-theo-coralSoft' : 'hover:bg-theo-surface'
+        } ${expanded && kind !== 'file' ? 'bg-theo-surface' : ''}`}
+        style={{ paddingLeft: `${indent}px` }}
+      >
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={!canExpand}
+          aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
+          className="p-0.5 flex-shrink-0 rounded text-theo-ink3 hover:text-theo-ink disabled:opacity-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-theo-coral"
+        >
+          {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={onLabelClick}
+          className="flex items-center gap-1.5 flex-1 min-w-0 text-left py-1.5 pr-2 rounded text-sm text-theo-ink2 hover:text-theo-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-theo-coral"
+          title={selectable ? `Select folder: ${label}` : label}
+        >
+          <NodeIcon className={`w-4 h-4 flex-shrink-0 ${iconCls}`} />
+          <span className={`truncate ${kind === 'client' ? 'font-semibold text-theo-ink' : ''}`}>{label}</span>
+        </button>
+      </div>
+
+      {expanded && (
+        <div role="group">
+          {loading && (
+            <div className="flex items-center gap-1 text-xs text-theo-ink3 py-1" style={{ paddingLeft: `${indent + 12}px` }}>
+              <Loader2 className="w-3 h-3 animate-spin" /> Loading…
+            </div>
+          )}
+          {!loading && children?.length === 0 && (
+            <div className="text-xs text-theo-ink3 py-1" style={{ paddingLeft: `${indent + 12}px` }}>
+              (empty folder)
+            </div>
+          )}
+          {!loading && children?.map((child) => (
+            <TreeNode
+              key={child.itemId}
+              siteId={siteId}
+              itemId={child.itemId}
+              label={child.name}
+              hasChildren={child.kind === 'folder' ? child.hasChildren : false}
+              depth={depth + 1}
+              kind={child.kind}
+              webUrl={child.kind === 'file' ? child.webUrl : undefined}
+              mimeType={child.kind === 'file' ? child.mimeType : undefined}
+              getAccessToken={getAccessToken}
+              onOpenFile={onOpenFile}
+              pickMode={pickMode}
+              onPickFolder={onPickFolder}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export interface DmsBrowserProps {
   navSlot?: HTMLElement | null;
   getAccessToken: ShellTokenProvider;
-  onOpenFile?: (node: DmsNode) => void;
-  onPickFolder?: (siteId: string, node: DmsNode) => void;
+  onOpenFile?: (node: DmsFileNode) => void;
+  pickMode?: boolean;
+  onPickFolder?: (pick: { siteId: string; itemId: string; name: string }) => void;
 }
 
-const rowStyle = (depth: number): React.CSSProperties => ({
-  display: 'flex', alignItems: 'center', gap: 6,
-  padding: '6px 10px', paddingLeft: 10 + depth * 14,
-  borderRadius: 8, fontSize: 13.5, color: C.ink2, cursor: 'pointer',
-  fontFamily: SANS, userSelect: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-});
-
-function FolderNode({ client, siteId, node, depth, onOpenFile }: {
-  client: DmsClient; siteId: string; node: DmsNode; depth: number; onOpenFile: (n: DmsNode) => void;
+function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder }: {
+  getAccessToken: ShellTokenProvider;
+  onOpenFile: (n: DmsFileNode) => void;
+  pickMode: boolean;
+  onPickFolder?: (p: { siteId: string; itemId: string; name: string }) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [children, setChildren] = useState<DmsNode[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [clients, setClients] = useState<DmsClient[] | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const toggle = async () => {
-    const next = !open;
-    setOpen(next);
-    if (next && children === null && !loading) {
-      setLoading(true);
-      const r = await client.getTree(siteId, node.itemId);
-      setChildren(r.children);
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    void listDmsSites(getAccessToken).then((list) => { if (active) { setClients(list); setLoading(false); } });
+    return () => { active = false; };
+  }, [getAccessToken]);
 
   return (
-    <div>
-      <div className="dms-row" style={rowStyle(depth)} onClick={toggle} title={node.name}>
-        <span style={{ color: C.ink3, width: 12, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
-        <span style={{ flexShrink: 0 }}>📁</span>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.name}</span>
+    <div className="flex flex-col h-full min-h-0 font-sans text-theo-ink">
+      <div className="flex items-center gap-1.5 px-2 py-2 flex-shrink-0">
+        <Database className="w-3.5 h-3.5 text-theo-ink3 flex-shrink-0" />
+        <span className="flex-1 text-left text-[10px] font-semibold uppercase tracking-widest text-theo-ink3">Vault Files</span>
       </div>
-      {open && (
-        loading && children === null
-          ? <div style={{ ...rowStyle(depth + 1), color: C.ink3, cursor: 'default' }}>Loading…</div>
-          : <NodeList client={client} siteId={siteId} nodes={children || []} depth={depth + 1} onOpenFile={onOpenFile} />
-      )}
-    </div>
-  );
-}
-
-function NodeList({ client, siteId, nodes, depth, onOpenFile }: {
-  client: DmsClient; siteId: string; nodes: DmsNode[]; depth: number; onOpenFile: (n: DmsNode) => void;
-}) {
-  if (nodes.length === 0) return <div style={{ ...rowStyle(depth), color: C.ink3, cursor: 'default' }}>Empty</div>;
-  return (
-    <>
-      {nodes.map((n) => n.type === 'folder'
-        ? <FolderNode key={n.itemId} client={client} siteId={siteId} node={n} depth={depth} onOpenFile={onOpenFile} />
-        : (
-          <div key={n.itemId} className="dms-row" style={rowStyle(depth)} onClick={() => onOpenFile(n)} title={n.name}>
-            <span style={{ width: 12, flexShrink: 0 }} />
-            <span style={{ flexShrink: 0 }}>📄</span>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.name}</span>
+      <div className="flex-1 min-h-0 overflow-y-auto px-1 pb-2 text-sm" data-testid="dms-browser">
+        {loading && (
+          <div className="flex items-center gap-1.5 text-xs text-theo-ink3 px-2 py-2">
+            <Loader2 className="w-3 h-3 animate-spin" /> Loading clients…
           </div>
-        ))}
-    </>
-  );
-}
-
-function SiteNode({ client, site, onOpenFile }: { client: DmsClient; site: DmsSite; onOpenFile: (n: DmsNode) => void }) {
-  const [open, setOpen] = useState(false);
-  const [children, setChildren] = useState<DmsNode[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const toggle = async () => {
-    const next = !open;
-    setOpen(next);
-    if (next && children === null && !loading) {
-      setLoading(true);
-      const r = await client.getTree(site.siteId);
-      setChildren(r.children);
-      setLoading(false);
-    }
-  };
-  return (
-    <div>
-      <div className="dms-row" style={{ ...rowStyle(0), color: C.ink, fontWeight: 600 }} onClick={toggle} title={site.name}>
-        <span style={{ color: C.ink3, width: 12, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
-        <span style={{ flexShrink: 0 }}>🗂️</span>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{site.name}</span>
+        )}
+        {!loading && clients?.length === 0 && (
+          <p className="text-xs text-theo-ink3 px-2 py-2">No accessible clients.</p>
+        )}
+        {!loading && !!clients?.length && (
+          <div role="tree" aria-label="DMS mirror">
+            {clients.map((c) => (
+              <TreeNode
+                key={c.clientKey}
+                siteId={c.clientKey}
+                label={c.clientLabel}
+                hasChildren
+                depth={0}
+                kind="client"
+                getAccessToken={getAccessToken}
+                onOpenFile={onOpenFile}
+                pickMode={pickMode}
+                onPickFolder={onPickFolder}
+              />
+            ))}
+          </div>
+        )}
       </div>
-      {open && (
-        loading && children === null
-          ? <div style={{ ...rowStyle(1), color: C.ink3, cursor: 'default' }}>Loading…</div>
-          : <NodeList client={client} siteId={site.siteId} nodes={children || []} depth={1} onOpenFile={onOpenFile} />
-      )}
     </div>
   );
 }
 
-function BrowserTree({ getAccessToken, onOpenFile, onPickFolder, fluid }: {
-  getAccessToken: ShellTokenProvider; onOpenFile: (n: DmsNode) => void; onPickFolder?: (siteId: string, n: DmsNode) => void; fluid: boolean;
-}) {
-  const client = useMemo(() => makeDmsClient(getAccessToken), [getAccessToken]);
-  const [sites, setSites] = useState<DmsSite[] | null>(null);
-  const [query, setQuery] = useState('');
-  useEffect(() => { let live = true; client.listSites().then((s) => { if (live) setSites(s); }); return () => { live = false; }; }, [client]);
-  void onPickFolder;
-
-  const filtered = (sites || []).filter((s) => !query.trim() || (s.name + s.webUrl).toLowerCase().includes(query.trim().toLowerCase()));
-
-  return (
-    <aside className="dms-scroll" style={{
-      width: fluid ? '100%' : 300, height: '100%', display: 'flex', flexDirection: 'column',
-      background: C.sidebar, borderRight: fluid ? 'none' : `1px solid ${C.line}`, fontFamily: SANS, color: C.ink, overflow: 'hidden',
-    }}>
-      <style>{STYLE_BLOCK}</style>
-      <div style={{ padding: '12px 12px 8px', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <span style={{ fontSize: 11.5, letterSpacing: 0.4, textTransform: 'uppercase', color: C.ink3, fontWeight: 600 }}>Vault Files</span>
-      </div>
-      <div style={{ padding: '0 10px 10px', flexShrink: 0 }}>
-        <input
-          value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter sites…"
-          style={{ width: '100%', padding: '7px 10px', border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 13, background: C.card, color: C.ink, fontFamily: SANS, outline: 'none' }}
-        />
-      </div>
-      <div className="dms-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 6px 10px' }}>
-        {sites === null
-          ? <div style={{ ...rowStyle(0), color: C.ink3, cursor: 'default' }}>Loading your files…</div>
-          : filtered.length === 0
-            ? <div style={{ ...rowStyle(0), color: C.ink3, cursor: 'default' }}>No sites.</div>
-            : filtered.map((s) => <SiteNode key={s.siteId} client={client} site={s} onOpenFile={onOpenFile} />)}
-      </div>
-    </aside>
-  );
-}
-
-export default function DmsBrowser({ navSlot, getAccessToken, onOpenFile, onPickFolder }: DmsBrowserProps) {
-  const open = (n: DmsNode) => {
+export default function DmsBrowser({ navSlot, getAccessToken, onOpenFile, pickMode, onPickFolder }: DmsBrowserProps) {
+  const open = (n: DmsFileNode) => {
     if (onOpenFile) { onOpenFile(n); return; }
-    if (n.webUrl) window.open(n.webUrl, '_blank', 'noopener');
+    if (n.webUrl) window.open(n.webUrl, '_blank', 'noopener,noreferrer');
   };
-  const tree = <BrowserTree getAccessToken={getAccessToken} onOpenFile={open} onPickFolder={onPickFolder} fluid={!!navSlot} />;
+  const tree = <Tree getAccessToken={getAccessToken} onOpenFile={open} pickMode={!!pickMode} onPickFolder={onPickFolder} />;
 
+  // Hosted: the shell owns the collapsible/draggable rail; we portal the tree into its navSlot.
   if (navSlot) return createPortal(tree, navSlot);
 
-  // Standalone (dms-dev harness): the 1/10 rail on the left, an empty 9/10 to its right
-  // (DMS is a rail-only app — no 9/10 by design).
+  // Standalone (dms-dev harness): a fixed 1/10 rail (the shell's drag/collapse is not our concern
+  // here) + an empty 9/10 — DMS is a rail-only app.
   return (
-    <div style={{ height: '100vh', width: '100%', display: 'flex', fontFamily: SANS, background: C.bg, overflow: 'hidden' }}>
-      {tree}
-      <main style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.ink3, fontSize: 13 }}>
+    <div className="h-screen w-full flex bg-theo-bg overflow-hidden">
+      <aside className="w-[300px] flex-shrink-0 border-r border-theo-line bg-theo-surface overflow-hidden">
+        {tree}
+      </aside>
+      <main className="flex-1 min-w-0 flex items-center justify-center text-theo-ink3 text-sm">
         DMS is a rail-only app — files open in SharePoint.
       </main>
     </div>
