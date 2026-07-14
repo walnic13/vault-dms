@@ -54,6 +54,16 @@ const DOC_ALIASES = [
   ["Vault DMS Azure Postgres Schema", "spec/VAULT_DMS_AZURE_POSTGRES_SCHEMA.md"],
   ["Vault DMS API Spec", "spec/VAULT_DMS_API_SPEC.md"],
   ["this Standard", "governance/VAULT_DMS_GROUNDING_CONFORMANCE_STANDARD.md"],
+  // FE-RETARGETED (2026-07-14): vault-dms adopts the Theo FE governance STANDARDS verbatim
+  // (governance/*FRONTEND* + Golden Component Pack) for the dmsApp/DmsBrowser remote; its FE plan
+  // authority is vault-dms's own spec/VAULT_DMS_FRONTEND_PLAN.md. Both the Theo-named turn-type
+  // matrix keys and DMS-named keys resolve to the same authority so an F-track VEP lints clean.
+  ["Theo Phase 1A Frontend Plan", "spec/VAULT_DMS_FRONTEND_PLAN.md"],
+  ["Vault DMS Frontend Plan", "spec/VAULT_DMS_FRONTEND_PLAN.md"],
+  ["Claude Code Theo Frontend Governor Standard", "governance/CLAUDE_CODE_THEO_FRONTEND_GOVERNOR_STANDARD.md"],
+  ["Codex Theo Frontend Review Standard", "governance/CODEX_THEO_FRONTEND_REVIEW_STANDARD.md"],
+  ["Theo Golden Component Pack Standard", "governance/THEO_GOLDEN_COMPONENT_PACK_STANDARD.md"],
+  ["Theo Frontend Grounding Conformance Standard", "governance/THEO_FRONTEND_GROUNDING_CONFORMANCE_STANDARD.md"],
 ];
 
 function resolveDocAlias(chunk) {
