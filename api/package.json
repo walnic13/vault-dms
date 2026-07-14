@@ -1,0 +1,7 @@
+{
+  "name": "vault-dms",
+  "version": "1.0.0",
+  "description": "Vault DMS — a stateless mirror gateway that surfaces the tenant's SharePoint DMS inside Vault Origin via delegated Microsoft Graph (OBO). No database; SharePoint is the system of record. All Vault apps consume the DMS through Origin.",
+  "scripts": {},
+  "dependencies": {}
+}
