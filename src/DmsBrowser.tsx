@@ -47,12 +47,13 @@ interface TreeNodeProps {
   getAccessToken: ShellTokenProvider;
   onOpenFile: (node: DmsFileNode) => void;
   pickMode: boolean;
-  onPickFolder?: (pick: { siteId: string; itemId: string; name: string }) => void;
+  onPickFolder?: (pick: { siteId: string; itemId: string; name: string; parentName?: string }) => void;
+  parentName?: string;
   webUrl?: string;
   mimeType?: string;
 }
 
-function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessToken, onOpenFile, pickMode, onPickFolder, webUrl, mimeType }: TreeNodeProps) {
+function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessToken, onOpenFile, pickMode, onPickFolder, parentName, webUrl, mimeType }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<DmsTreeNode[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -78,11 +79,11 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
       return;
     }
     if (kind === 'folder' && pickMode && itemId && onPickFolder) {
-      onPickFolder({ siteId, itemId, name: label });
+      onPickFolder({ siteId, itemId, name: label, parentName });
       return;
     }
     toggle();
-  }, [kind, pickMode, onPickFolder, itemId, siteId, label, toggle, onOpenFile, webUrl, mimeType]);
+  }, [kind, pickMode, onPickFolder, itemId, siteId, label, parentName, toggle, onOpenFile, webUrl, mimeType]);
 
   const canExpand = kind === 'client' || (kind === 'folder' && hasChildren);
   const fileIcon = kind === 'file' ? fileTypeIcon(label) : null;
@@ -150,6 +151,7 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
               onOpenFile={onOpenFile}
               pickMode={pickMode}
               onPickFolder={onPickFolder}
+              parentName={label}
             />
           ))}
         </div>
@@ -163,14 +165,14 @@ export interface DmsBrowserProps {
   getAccessToken: ShellTokenProvider;
   onOpenFile?: (node: DmsFileNode) => void;
   pickMode?: boolean;
-  onPickFolder?: (pick: { siteId: string; itemId: string; name: string }) => void;
+  onPickFolder?: (pick: { siteId: string; itemId: string; name: string; parentName?: string }) => void;
 }
 
 function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder, showHeader }: {
   getAccessToken: ShellTokenProvider;
   onOpenFile: (n: DmsFileNode) => void;
   pickMode: boolean;
-  onPickFolder?: (p: { siteId: string; itemId: string; name: string }) => void;
+  onPickFolder?: (p: { siteId: string; itemId: string; name: string; parentName?: string }) => void;
   showHeader: boolean;
 }) {
   const [clients, setClients] = useState<DmsClient[] | null>(null);
