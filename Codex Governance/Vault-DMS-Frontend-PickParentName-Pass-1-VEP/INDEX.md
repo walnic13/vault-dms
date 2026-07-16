@@ -7,7 +7,7 @@ Plan-only VEP. Consumers of the `dmsApp/DmsBrowser` folder-pick (Sigma's New-Rev
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: __HEAD__ (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit)
+Turn issued against HEAD: babb4728d855e199325876978a29c0a493b16544 (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
