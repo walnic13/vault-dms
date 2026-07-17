@@ -9,7 +9,7 @@ Turn Type: Verified Evidence Pack (backend plan)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: P5
-Turn issued against HEAD: vault-dms `c2d344093fc3573dd0fb269b4289532bd012910b` (pre-commit; GCR HEAD repointed to the package-present commit on landing per Conformance T25)
+Turn issued against HEAD: vault-dms `c9654720996c5162347e1ed46b8277934a95aa9f` (the commit that contains this package; grounding reads were against parent `c2d344093fc3573dd0fb269b4289532bd012910b`, and the cited-file blob SHAs are HEAD-stable across that parent→child commit since none were modified)
 Currency-anchor form: git blob SHA at HEAD (Conformance §8 fallback), captured via `git rev-parse HEAD:<path>` this turn. Absolute paths in the Rule Anchor Table.
 
 ## Rule Anchor Table
