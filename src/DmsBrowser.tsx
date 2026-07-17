@@ -47,12 +47,14 @@ interface TreeNodeProps {
   getAccessToken: ShellTokenProvider;
   onOpenFile: (node: DmsFileNode) => void;
   pickMode: boolean;
-  onPickFolder?: (pick: { siteId: string; itemId: string; name: string }) => void;
+  onPickFolder?: (pick: { siteId: string; itemId: string; name: string; parentName?: string }) => void;
+  parentName?: string;
   webUrl?: string;
   mimeType?: string;
+  webDavUrl?: string;
 }
 
-function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessToken, onOpenFile, pickMode, onPickFolder, webUrl, mimeType }: TreeNodeProps) {
+function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessToken, onOpenFile, pickMode, onPickFolder, parentName, webUrl, mimeType, webDavUrl }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<DmsTreeNode[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -74,15 +76,15 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
 
   const onLabelClick = useCallback(() => {
     if (kind === 'file') {
-      onOpenFile({ kind: 'file', itemId: itemId ?? '', name: label, webUrl: webUrl ?? '', mimeType });
+      onOpenFile({ kind: 'file', itemId: itemId ?? '', name: label, webUrl: webUrl ?? '', mimeType, webDavUrl });
       return;
     }
     if (kind === 'folder' && pickMode && itemId && onPickFolder) {
-      onPickFolder({ siteId, itemId, name: label });
+      onPickFolder({ siteId, itemId, name: label, parentName });
       return;
     }
     toggle();
-  }, [kind, pickMode, onPickFolder, itemId, siteId, label, toggle, onOpenFile, webUrl, mimeType]);
+  }, [kind, pickMode, onPickFolder, itemId, siteId, label, parentName, toggle, onOpenFile, webUrl, mimeType, webDavUrl]);
 
   const canExpand = kind === 'client' || (kind === 'folder' && hasChildren);
   const fileIcon = kind === 'file' ? fileTypeIcon(label) : null;
@@ -146,10 +148,12 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
               kind={child.kind}
               webUrl={child.kind === 'file' ? child.webUrl : undefined}
               mimeType={child.kind === 'file' ? child.mimeType : undefined}
+              webDavUrl={child.kind === 'file' ? child.webDavUrl : undefined}
               getAccessToken={getAccessToken}
               onOpenFile={onOpenFile}
               pickMode={pickMode}
               onPickFolder={onPickFolder}
+              parentName={label}
             />
           ))}
         </div>
@@ -163,14 +167,15 @@ export interface DmsBrowserProps {
   getAccessToken: ShellTokenProvider;
   onOpenFile?: (node: DmsFileNode) => void;
   pickMode?: boolean;
-  onPickFolder?: (pick: { siteId: string; itemId: string; name: string }) => void;
+  onPickFolder?: (pick: { siteId: string; itemId: string; name: string; parentName?: string }) => void;
 }
 
-function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder }: {
+function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder, showHeader }: {
   getAccessToken: ShellTokenProvider;
   onOpenFile: (n: DmsFileNode) => void;
   pickMode: boolean;
-  onPickFolder?: (p: { siteId: string; itemId: string; name: string }) => void;
+  onPickFolder?: (p: { siteId: string; itemId: string; name: string; parentName?: string }) => void;
+  showHeader: boolean;
 }) {
   const [clients, setClients] = useState<DmsClient[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -184,10 +189,14 @@ function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder }: {
 
   return (
     <div className="flex flex-col h-full min-h-0 font-sans text-theo-ink">
-      <div className="flex items-center gap-1.5 px-2 py-2 flex-shrink-0">
-        <Database className="w-3.5 h-3.5 text-theo-ink3 flex-shrink-0" />
-        <span className="flex-1 text-left text-[10px] font-semibold uppercase tracking-widest text-theo-ink3">Vault Files</span>
-      </div>
+      {/* The browser's own header shows only when standalone; when hosted (navSlot present) the host
+          shell provides the collapsible "Vault Files" section header, so we suppress this one. */}
+      {showHeader && (
+        <div className="flex items-center gap-1.5 px-2 py-2 flex-shrink-0">
+          <Database className="w-3.5 h-3.5 text-theo-ink3 flex-shrink-0" />
+          <span className="flex-1 text-left text-[10px] font-semibold uppercase tracking-widest text-theo-ink3">Vault Files</span>
+        </div>
+      )}
       <div className="flex-1 min-h-0 overflow-y-auto px-1 pb-2 text-sm" data-testid="dms-browser">
         {loading && (
           <div className="flex items-center gap-1.5 text-xs text-theo-ink3 px-2 py-2">
@@ -225,7 +234,7 @@ export default function DmsBrowser({ navSlot, getAccessToken, onOpenFile, pickMo
     if (onOpenFile) { onOpenFile(n); return; }
     if (n.webUrl) window.open(n.webUrl, '_blank', 'noopener,noreferrer');
   };
-  const tree = <Tree getAccessToken={getAccessToken} onOpenFile={open} pickMode={!!pickMode} onPickFolder={onPickFolder} />;
+  const tree = <Tree getAccessToken={getAccessToken} onOpenFile={open} pickMode={!!pickMode} onPickFolder={onPickFolder} showHeader={!navSlot} />;
 
   // Hosted: the shell owns the collapsible/draggable rail; we portal the tree into its navSlot.
   if (navSlot) return createPortal(tree, navSlot);

@@ -25,6 +25,9 @@ export interface DmsFileNode {
   name: string;
   webUrl: string;
   mimeType?: string;
+  // WebDAV direct path (dms_tree §2.2 web_dav_url) — the URL a host uses to open the file in the
+  // desktop Office app (ms-excel:ofe|u|). Optional: absent-safe; consumers fall back to webUrl.
+  webDavUrl?: string;
 }
 
 export type DmsTreeNode = DmsFolderNode | DmsFileNode;
@@ -88,16 +91,16 @@ export async function getDmsTree(
   if (!res.ok) { console.warn(`[DMS] dms_tree returned ${res.status}`); return []; }
 
   let json: {
-    data?: { dms_tree?: { children?: Array<{ item_id?: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string }> } };
+    data?: { dms_tree?: { children?: Array<{ item_id?: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string; web_dav_url?: string }> } };
   };
   try { json = await res.json(); } catch { console.warn('[DMS] dms_tree malformed body'); return []; }
 
   const children = json.data?.dms_tree?.children ?? [];
   return children
-    .filter((n): n is { item_id: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string } => !!n?.item_id)
+    .filter((n): n is { item_id: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string; web_dav_url?: string } => !!n?.item_id)
     .map((n): DmsTreeNode =>
       n.type === 'file'
-        ? { kind: 'file', itemId: n.item_id, name: n.name ?? '(unnamed file)', webUrl: n.web_url ?? '', mimeType: n.mime_type }
+        ? { kind: 'file', itemId: n.item_id, name: n.name ?? '(unnamed file)', webUrl: n.web_url ?? '', mimeType: n.mime_type, webDavUrl: n.web_dav_url }
         : { kind: 'folder', itemId: n.item_id, name: n.name ?? '(unnamed folder)', hasChildren: !!n.has_children },
     );
 }
