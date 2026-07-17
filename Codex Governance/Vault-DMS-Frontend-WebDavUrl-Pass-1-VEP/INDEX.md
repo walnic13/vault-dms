@@ -7,7 +7,7 @@ Plan-only VEP. The Origin shell opens Office files in the desktop app via `ms-ex
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: __PKG_COMMIT__ (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit)
+Turn issued against HEAD: 65675048cf59649216e4017efeaaa4ee64d19362 (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
