@@ -51,9 +51,10 @@ interface TreeNodeProps {
   parentName?: string;
   webUrl?: string;
   mimeType?: string;
+  webDavUrl?: string;
 }
 
-function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessToken, onOpenFile, pickMode, onPickFolder, parentName, webUrl, mimeType }: TreeNodeProps) {
+function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessToken, onOpenFile, pickMode, onPickFolder, parentName, webUrl, mimeType, webDavUrl }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<DmsTreeNode[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -75,7 +76,7 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
 
   const onLabelClick = useCallback(() => {
     if (kind === 'file') {
-      onOpenFile({ kind: 'file', itemId: itemId ?? '', name: label, webUrl: webUrl ?? '', mimeType });
+      onOpenFile({ kind: 'file', itemId: itemId ?? '', name: label, webUrl: webUrl ?? '', mimeType, webDavUrl });
       return;
     }
     if (kind === 'folder' && pickMode && itemId && onPickFolder) {
@@ -83,7 +84,7 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
       return;
     }
     toggle();
-  }, [kind, pickMode, onPickFolder, itemId, siteId, label, parentName, toggle, onOpenFile, webUrl, mimeType]);
+  }, [kind, pickMode, onPickFolder, itemId, siteId, label, parentName, toggle, onOpenFile, webUrl, mimeType, webDavUrl]);
 
   const canExpand = kind === 'client' || (kind === 'folder' && hasChildren);
   const fileIcon = kind === 'file' ? fileTypeIcon(label) : null;
@@ -147,6 +148,7 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
               kind={child.kind}
               webUrl={child.kind === 'file' ? child.webUrl : undefined}
               mimeType={child.kind === 'file' ? child.mimeType : undefined}
+              webDavUrl={child.kind === 'file' ? child.webDavUrl : undefined}
               getAccessToken={getAccessToken}
               onOpenFile={onOpenFile}
               pickMode={pickMode}
