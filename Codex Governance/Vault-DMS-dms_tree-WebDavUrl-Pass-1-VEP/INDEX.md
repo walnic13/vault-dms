@@ -9,7 +9,7 @@ Turn Type: Verified Evidence Pack (backend plan)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: P5
-Turn issued against HEAD: vault-dms `c9654720996c5162347e1ed46b8277934a95aa9f` (the commit that contains this package; grounding reads were against parent `c2d344093fc3573dd0fb269b4289532bd012910b`, and the cited-file blob SHAs are HEAD-stable across that parent→child commit since none were modified)
+Turn issued against HEAD: vault-dms `bb23384e29c53d4a03359635b58027653e3fa6c1` (the commit containing the corrected package; supersedes the initial `c9654720996c5162347e1ed46b8277934a95aa9f`). The four Vault DMS authority docs + the deployed baseline `dms_tree` cited below are UNMODIFIED at this HEAD (blob SHAs unchanged from grounding). This package's amended handler `handlers/dms_tree/index.js` is at blob `f7f713612371b1a44ba46863523a10292c514336` at this HEAD (its Rule Anchor quote "the file's WebDAV direct path, projected from the SAME" is verifiable there).
 Currency-anchor form: git blob SHA at HEAD (Conformance §8 fallback), captured via `git rev-parse HEAD:<path>` this turn. Absolute paths in the Rule Anchor Table.
 
 ## Rule Anchor Table
@@ -26,8 +26,8 @@ Currency-anchor form: git blob SHA at HEAD (Conformance §8 fallback), captured 
 | c:/Users/WalterMansfield/Vault Group LLP/Innovate - Documents/Tax Workpapers Project/2026/vault-dms/Codex Governance/Vault-DMS-dms_tree-Pass-1-VEP/handlers/dms_tree/index.js | baseline | "Enumerate the immediate children of a drive node — FILES AND FOLDERS" | Deployed baseline being amended (byte-identical except the delta) |
 | c:/Users/WalterMansfield/Vault Group LLP/Innovate - Documents/Tax Workpapers Project/2026/vault-dms/Codex Governance/Vault-DMS-dms_tree-WebDavUrl-Pass-1-VEP/handlers/dms_tree/index.js | delta | "the file's WebDAV direct path, projected from the SAME" | The single added field (file projection) |
 
-### Currency anchors (HEAD blob SHAs, this turn)
-- GOLDEN_HANDLER `dfc7fe2701f20ab6f255f3a5f280e771639d9ca1`; ARCHITECTURE `ceb3fd5caea307e13db0d649230130d897833663`; API_SPEC `ec25d828c950362f5e4d5bfa781da844078babac`; AZURE_POSTGRES `b6a5b1c65b787230b2492820538558f449e2bd33`; deployed `dms_tree` `871a39b8f3d56d3b065772f55e5b7716a80a9f57`.
+### Currency anchors (blob SHAs at HEAD `bb23384`, independently verifiable via `git rev-parse HEAD:<path>`)
+- GOLDEN_HANDLER `dfc7fe2701f20ab6f255f3a5f280e771639d9ca1`; ARCHITECTURE `ceb3fd5caea307e13db0d649230130d897833663`; API_SPEC `ec25d828c950362f5e4d5bfa781da844078babac`; AZURE_POSTGRES `b6a5b1c65b787230b2492820538558f449e2bd33`; deployed baseline `dms_tree` `871a39b8f3d56d3b065772f55e5b7716a80a9f57`; **this package's amended `dms_tree` handler `f7f713612371b1a44ba46863523a10292c514336`**.
 
 ## §1 Feature Identification + Architecture & boundary reconciliation
 - **Feature:** `dms_tree` file nodes gain **`web_dav_url`** (the DriveItem `webDavUrl`, the direct SharePoint path). The Vault Origin shell uses it to build the Office desktop URI (`ms-excel:ofe|u|<web_dav_url>`); the existing `web_url` (a `Doc.aspx?sourcedoc=…` viewer URL) errors with "Office doesn't recognise the command." **DEPLOYED** endpoint modified: `dms_tree` (§2.2). No new route.
