@@ -266,7 +266,12 @@ async function graphGetJson(url, accessToken) {
 // same Graph endpoint the reference handler already calls (folders-only there).
 async function enumerateImmediateChildren(driveId, parentItemId, accessToken) {
   const children = [];
-  let nextUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(parentItemId)}/children`;
+  // ALLOWED DELTA ($select projection): webDavUrl is NOT in Graph's default /children DriveItem
+  // projection (verified: the field returned null without it), so it is requested explicitly on
+  // the SAME /children call. All other selected fields are the ones the projection already reads
+  // (id/name/size/lastModifiedDateTime/webUrl and the folder/file facets, which carry childCount /
+  // mimeType). Same endpoint — no new Graph call. $select is preserved across @odata.nextLink pages.
+  let nextUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(parentItemId)}/children?$select=id,name,size,lastModifiedDateTime,webUrl,webDavUrl,folder,file`;
 
   while (nextUrl) {
     let page;

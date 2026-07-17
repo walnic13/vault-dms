@@ -31,10 +31,12 @@ Currency-anchor form: git blob SHA at HEAD (Conformance §8 fallback), captured 
 
 ## §1 Feature Identification + Architecture & boundary reconciliation
 - **Feature:** `dms_tree` file nodes gain **`web_dav_url`** (the DriveItem `webDavUrl`, the direct SharePoint path). The Vault Origin shell uses it to build the Office desktop URI (`ms-excel:ofe|u|<web_dav_url>`); the existing `web_url` (a `Doc.aspx?sourcedoc=…` viewer URL) errors with "Office doesn't recognise the command." **DEPLOYED** endpoint modified: `dms_tree` (§2.2). No new route.
-- **Boundary (architecture):** stateless — no database, no `pg`, no `reporting_*`/`theo_*` access; delegated OBO as the signed-in user. `web_dav_url` is read from the **SAME** `/drives/{id}/items/{id}/children` DriveItem already fetched — **no new Graph endpoint, no new token/auth surface, no new helper** (Golden Handler §4). Folders do not carry it (open-in-app is a file affordance). No Azure Postgres connection (Azure Postgres Schema §1).
+- **Boundary (architecture):** stateless — no database, no `pg`, no `reporting_*`/`theo_*` access; delegated OBO as the signed-in user. `web_dav_url` is read from the **SAME** `/drives/{id}/items/{id}/children` call (now with `$select` including `webDavUrl` — a projection on the same endpoint) — **no new Graph endpoint, no new token/auth surface, no new helper** (Golden Handler §4). Folders do not carry `web_dav_url` (open-in-app is a file affordance). No Azure Postgres connection (Azure Postgres Schema §1).
 
 ## §2 Gap Register
-**PRE-LAND** — the API Spec §2.2 `dms_tree` Success shape does not yet list `web_dav_url`. This VEP lands a scoped Role-C verbatim edit adding it to the children file projection in the SAME microstep (Governor PRE-LAND; §5 below). No other gap: `webDavUrl` is a default DriveItem property present in the existing `/children` response (no `$select` is used), so no Graph query change is required.
+**PRE-LAND** — the API Spec §2.2 `dms_tree` Success shape does not yet list `web_dav_url`. This VEP lands a scoped Role-C verbatim edit adding it to the children file projection in the SAME microstep (Governor PRE-LAND; §5 below).
+
+**`$select` projection (evidence-gated correction).** A first Pass-3 golden curl against the deployed handler returned `web_dav_url: null` — i.e. **`webDavUrl` is NOT in Graph's default `/children` DriveItem projection** (this VEP originally inferred it was; the curl disproved that — the governor's anti-guess rule catching an inference, as intended). The handler therefore requests it explicitly via `$select=id,name,size,lastModifiedDateTime,webUrl,webDavUrl,folder,file` on the **SAME** `/children` call — a **projection change on the same endpoint** (Golden Handler §4: "the specific Graph call(s) and projection"), **not** a new Graph endpoint. The `folder`/`file` facets are selected so `childCount`/`mimeType` (→ `has_children` / `mime_type`) are preserved; the §6 golden curl asserts all three (`web_dav_url` populated, `has_children`, `mime_type`) so any facet-selection regression is caught at deploy.
 
 ## §3 Sub-phase walk (P1–P8)
 - **P1 Feature identification:** §1 above — `dms_tree` DEPLOYED; add one projection field.
@@ -53,7 +55,8 @@ Baseline = the APPROVED deployed `dms_tree` (`871a39b8`), itself the approved st
 |--------|-----------------------------------------------|----------------|--------|
 | Family-B helper block (send/errorBody/successBody/getPrincipal/getClaimValue/parseBody/parseJsonSafe/requestUrl/getOboInputToken/exchangeGraphToken/graphGetJson) | byte-identical | EXACT | Golden Handler §4 (helper block EXACT) |
 | Validation, OBO input, Graph token exchange, drive/root/parent resolution, sort, envelope, error mapping | byte-identical to deployed `dms_tree` | EXACT | baseline anchor `871a39b8` |
-| `enumerateImmediateChildren` — **file** projection | adds `web_dav_url: typeof item.webDavUrl === "string" ? item.webDavUrl : null` to the file node, from the SAME `/children` DriveItem | **ALLOWED DELTA** (projection field; no new Graph call) | Golden Handler §4 ("the specific … projection; the contract's response shape") |
+| `enumerateImmediateChildren` — `/children` URL | adds `?$select=id,name,size,lastModifiedDateTime,webUrl,webDavUrl,folder,file` to the SAME `/children` call so `webDavUrl` is returned (not default) | **ALLOWED DELTA** (projection on the same endpoint; no new Graph call) | Golden Handler §4 ("the specific Graph call(s) and projection") |
+| `enumerateImmediateChildren` — **file** projection | adds `web_dav_url: typeof item.webDavUrl === "string" ? item.webDavUrl : null` to the file node, from the SAME `/children` DriveItem | **ALLOWED DELTA** (projection field) | Golden Handler §4 ("the specific … projection; the contract's response shape") |
 | `enumerateImmediateChildren` — **folder** projection | unchanged | EXACT | baseline anchor |
 
 No DEVIATION rows.
@@ -74,7 +77,7 @@ AFTER:
 Auth: `TOKEN=$(az account get-access-token --resource api://4e1a1e31-5c20-4480-99e4-098901707d9e --query accessToken -o tsv)` (as `wmansfield@vault-tax.com`). Site/folder pinned at run from `dms_list_sites` → the `7percent` site + the `2023/Vault/Deliverables` folder (a known Office-file folder).
 1. **OPTIONS** `dms_tree` → `204`.
 2. **Unauth** GET `dms_tree` (no bearer) → `401`.
-3. **Happy** GET `/api/dms_tree?siteId=<7percent>&parentItemId=<Deliverables folder>` with bearer → `200`; assert each `children[]` node with `type:"file"` carries a non-null `web_dav_url` that is an `https://vaulttax.sharepoint.com/…` direct path (NOT a `Doc.aspx` URL); folders carry no `web_dav_url`.
+3. **Happy** GET `/api/dms_tree?siteId=<7percent>&parentItemId=<folder with files>` with bearer → `200`; assert: (a) each `children[]` node with `type:"file"` carries a **non-null** `web_dav_url` that is an `https://vaulttax.sharepoint.com/…` direct path (NOT a `Doc.aspx` URL); (b) **no `$select` regression** — file nodes still carry `mime_type` and folder nodes still carry `has_children` (confirms the `folder`/`file` facets survived `$select`); (c) folders carry no `web_dav_url`.
 
 ## §7 Out of scope
 No change to any other `dms_*` handler, the Graph call set, auth, folders, or the stateless boundary. FE consumption of `web_dav_url` (vault-dms `DmsBrowser`/`dmsClient` + Origin `officeOpen`) is the paired FE follow-up, not this backend microstep.
