@@ -40,7 +40,7 @@ Sub-phase Track: P5
 ## Architecture & boundary reconciliation
 
 - **Stateless (Golden Handler §3; architecture §5; DR-D2):** no `pg`, no `Pool`, no stored cursor. The delta token is held by the CLIENT and passed back each call; the handler reconstructs the Graph delta URL server-side from the site-derived `driveId`.
-- **SSRF-safe token handling:** the client-supplied `deltaToken` is validated to a bounded URL-safe charset (`/^[A-Za-z0-9._~=+-]+$/`, ≤4000) and is used ONLY as the `token` query value on the handler's OWN `https://graph.microsoft.com/v1.0/drives/{driveId}/root/delta` URL. The handler never fetches a client-supplied URL; `@odata.nextLink`/`@odata.deltaLink` are reduced to their `token` param and re-composed onto the server-controlled URL.
+- **SSRF-safe cursor handling (handles all documented Graph link forms):** the delta cursor is Graph's own opaque continuation/deltaLink, round-tripped by the client. `safeGraphDeltaUrl` follows it VERBATIM — so every documented form works (`?token=`, `?$skiptoken=`, `?$deltatoken=`, and the function form `…/root/delta(token='…')`) — but ONLY after validating: `https:` + `hostname === graph.microsoft.com` + pathname matching `^/v1.0/drives/{driveId}/root/delta(\(…\))?$` with the decoded drive segment `=== driveId`. `new URL` normalizes `.`/`..` first, so no path-escape. The `driveId` is server-resolved from the caller's `siteId` under OBO, so the client can neither point at another host nor at a drive it didn't resolve. The baseline (no token) URL is server-constructed. This corrects the earlier single-`?token=` extraction (Codex T13 / Golden Handler §4 helper drift) that would break on the function/`$skiptoken` forms.
 - **New external Graph interaction (Golden Handler §4 / T12):** `/drives/{id}/root/delta` is not called by any deployed handler → authorized verbatim by Walter (above). All other Graph calls (`/sites/{id}/drive` site→drive resolution) mirror `reporting_dms_tree` EXACT.
 - **Delegated OBO as the signed-in user (Conformance §6 T40):** every Graph call is OBO; no application-permission read; no `reporting_*`/`theo_*` table.
 - **Files AND folders (architecture §3):** the change projection maps both `item.folder` and `item.file`, mirroring the §2.2 field set; `deleted` items carry `{ item_id, parent_id, deleted:true }`.
@@ -56,11 +56,11 @@ Sub-phase Track: P5
 ### §2.7 `dms_delta` — incremental drive change sync (live mirror)
 | Field | Value |
 |-------|-------|
-| Route | `GET /api/dms_delta?siteId=<10..200, no % or _>&deltaToken=<optional opaque, [A-Za-z0-9._~=+-], ≤4000>` |
+| Route | `GET /api/dms_delta?siteId=<10..200, no % or _>&deltaToken=<optional opaque Graph delta cursor, ≤8000; the prior response's delta_token, round-tripped verbatim>` |
 | Purpose | Return the DriveItems changed (added/renamed/moved/removed) since the caller's `deltaToken`, plus a fresh token; no token ⇒ full baseline. Cheap incremental refresh so a host patches its cached tree in place instead of re-listing (Layer 2 of the live-mirror plan). |
 | Success | `{ data: { dms_delta: { site_id, drive_id, baseline, changes: [ { item_id, parent_id, deleted, type?:"folder"\|"file", name?, size?, date_modified?, web_url?, has_children? (folders), mime_type?/web_dav_url? (files) } ], delta_token } } }` |
 | Errors | 400 invalid siteId/deltaToken; 401 EasyAuth/OBO; 404 site/drive not accessible (delegated Graph 403/404 → 404, existence-disclosure-safe); 500 other (incl. expired delta token → Graph 410). The client treats any non-2xx as drop-token-and-re-baseline. |
-| Primary reference | `reporting_dms_tree` (OBO + `/sites/{id}/drive` resolution + `@odata.nextLink` pagination). **Delta:** the Graph `/drives/{id}/root/delta` endpoint (Walter-authorized 2026-07-19); client-held opaque token (stateless); SSRF-safe server-reconstructed URL. |
+| Primary reference | `reporting_dms_tree` (OBO + `/sites/{id}/drive` resolution + `@odata.nextLink` pagination). **Delta:** the Graph `/drives/{id}/root/delta` endpoint (Walter-authorized 2026-07-19); client-held opaque Graph cursor (stateless); SSRF-safe — Graph links followed verbatim only after host + this-drive `/root/delta` path validation. |
 | Status | `proposed` |
 ```
 
@@ -90,7 +90,7 @@ No other gaps: stateless; depends on no unlanded prerequisite (the app + OBO/Eas
 | `require("https")`, corsHeaders, `SITE_ID_*` constants, `isValidSiteIdFormat`, `send`/`nowIso`/`errorBody`/`successBody`/`getPrincipal`/`getClaimValue`/`buildKnownError`/`parseJsonSafe`/`requestUrl`/`getBearerTokenFromAuthorization`/`getOboInputToken`/`exchangeGraphToken` | same | EXACT | frozen Family-B helper block (copied verbatim from deployed `dms_tree`) |
 | `graphGetJson` | same | EXACT | identical 403→FORBIDDEN / 404→NOT_FOUND / else→500 mapping — no new error-to-status contract |
 | oid + oboInput extraction, siteId validation | same | EXACT | reference validation preserved |
-| `DELTA_TOKEN_*` + `isValidDeltaTokenFormat`, `extractTokenParam` | (none) | ALLOWED DELTA | new bounded/SSRF-safe token validation + token-only extraction (never fetch a client URL) |
+| `DELTA_TOKEN_MAX_LENGTH` + `isValidDeltaTokenFormat` (length pre-check) + `safeGraphDeltaUrl` | (none) | ALLOWED DELTA | new SSRF-safe cursor validator — follows Graph's continuation/deltaLink verbatim (all documented forms) only after host + `/v1.0/drives/{driveId}/root/delta` path + decoded-driveId validation |
 | `/sites/{siteId}/drive` site→drive resolution | same Graph endpoint | EXACT | Golden Handler §4 (same endpoint) |
 | `/drives/{driveId}/root/delta[?token=]` paginated loop + `mapDeltaItem`, wrapped so a delegated 403/404 → route 404 | (none) | ALLOWED DELTA (Walter-authorized new endpoint) | Golden Handler §4 / T12 — verbatim authorization above; projection mirrors §2.2 fields + `deleted`/`parent_id`; 403/404→404 mirrors `dms_tree`'s existence-disclosure-safe taxonomy (no new error contract) |
 | response `{ dms_delta: { site_id, drive_id, baseline, changes, delta_token } }` | `{ dms_tree: { … } }` | ALLOWED DELTA | new contract per §2.7; same envelope/`successBody` shape |
@@ -116,7 +116,7 @@ Assertion: HTTP 200; body `{ data: { dms_delta: { site_id, drive_id, baseline:tr
 - [x] Stateless: no `pg`/`Pool`/DB/cursor/migration (no-DB §1; DR-D2) — client holds the token.
 - [x] Delegated OBO as the signed-in user; no application-permission content read (T40).
 - [x] New Graph endpoint (`/drive/root/delta`) authorized verbatim by Walter, predating this VEP (Golden Handler §4 / T12).
-- [x] SSRF-safe: client supplies only a bounded token; server reconstructs its own URL.
+- [x] SSRF-safe: Graph continuation/deltaLink followed verbatim (all documented forms) only after host + this-drive `/root/delta` path validation; baseline URL server-constructed; driveId server-resolved under OBO.
 - [x] Files AND folders (+ deleted) in the change projection (Architecture §3).
 - [x] `function.json`: `authLevel: anonymous`, methods `["get","options"]`, route `dms_delta`.
 - [x] Deterministic golden curl, no unbound placeholders (token inline; never printed).

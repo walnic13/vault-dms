@@ -8,11 +8,13 @@ const corsHeaders = {
 
 const SITE_ID_MIN_LENGTH = 10;
 const SITE_ID_MAX_LENGTH = 200;
-// Delta tokens are opaque and can be long. We accept a bounded, URL-safe token STRING only — never a
-// full URL — and reconstruct the Graph delta URL server-side, so a client can never steer the server
-// to fetch an arbitrary host (SSRF-safe). The charset excludes ':' and '/' so no scheme/host can slip in.
-const DELTA_TOKEN_MAX_LENGTH = 4000;
-const DELTA_TOKEN_RE = /^[A-Za-z0-9._~=+-]+$/;
+// The delta cursor round-tripped by the client is Graph's own opaque continuation/deltaLink. Graph
+// documents SEVERAL link forms (`?token=`, `?$skiptoken=`/`?$deltatoken=`, and the function form
+// `…/root/delta(token='…')`), so rather than parse a single query param we follow Graph's link
+// VERBATIM — but only after strictly validating it targets graph.microsoft.com and THIS drive's
+// `/root/delta` path (see safeGraphDeltaUrl). The driveId is server-resolved from the caller's
+// siteId under OBO, so a client can never steer the server to another drive or host (SSRF-safe).
+const DELTA_TOKEN_MAX_LENGTH = 8000;
 
 function send(context, status, body) {
   context.res = {
@@ -63,10 +65,10 @@ function isValidSiteIdFormat(value) {
   return true;
 }
 
+// Cheap pre-check on the raw query param (length + string). The SEMANTIC validation — that it is a
+// Graph delta URL for this drive — happens in safeGraphDeltaUrl once the driveId is known.
 function isValidDeltaTokenFormat(value) {
-  if (typeof value !== "string") return false;
-  if (value.length < 1 || value.length > DELTA_TOKEN_MAX_LENGTH) return false;
-  return DELTA_TOKEN_RE.test(value);
+  return typeof value === "string" && value.length >= 1 && value.length <= DELTA_TOKEN_MAX_LENGTH;
 }
 
 function buildKnownError(code, message, status) {
@@ -198,17 +200,33 @@ async function graphGetJson(url, accessToken) {
   throw buildKnownError("INTERNAL_SERVER_ERROR", graphMessage, 500);
 }
 
-// Extract ONLY the opaque `token` query value from a Graph @odata.deltaLink/@odata.nextLink. The
-// server reconstructs its own URL from this token (SSRF-safe) — the client never supplies a URL.
-function extractTokenParam(link) {
-  if (typeof link !== "string" || link === "") return null;
+// SSRF-safe validation of a Graph continuation/deltaLink (from Graph's response OR round-tripped by
+// the client). Accepts the link VERBATIM — handling every documented form (`?token=`, `?$skiptoken=`,
+// `?$deltatoken=`, and the function form `…/root/delta(token='…')`) — but ONLY if it targets
+// graph.microsoft.com over https and THIS drive's `/v1.0/drives/{driveId}/root/delta` path. The
+// driveId is server-resolved from the caller's siteId under OBO, so a client can neither point at
+// another host nor at a drive they didn't resolve. Returns the normalized URL string, or null.
+function safeGraphDeltaUrl(link, driveId) {
+  if (typeof link !== "string" || link === "" || link.length > DELTA_TOKEN_MAX_LENGTH) return null;
+  let u;
   try {
-    const u = new URL(link);
-    const t = u.searchParams.get("token");
-    return t && t.trim() !== "" ? t.trim() : null;
+    u = new URL(link);
   } catch {
     return null;
   }
+  if (u.protocol !== "https:" || u.hostname !== "graph.microsoft.com") return null;
+  // Path must be exactly this drive's delta endpoint (query form) or its function form `delta(...)`.
+  // `new URL` has already normalized any `.`/`..` segments, so a startsWith-escape is not possible.
+  const m = u.pathname.match(/^\/v1\.0\/drives\/([^/]+)\/root\/delta(\(.*\))?$/);
+  if (!m) return null;
+  let seg;
+  try {
+    seg = decodeURIComponent(m[1]);
+  } catch {
+    seg = m[1];
+  }
+  if (seg !== driveId) return null;
+  return u.toString();
 }
 
 // Map a delta DriveItem to the change projection. Deleted items carry a `deleted` facet and usually
@@ -323,23 +341,33 @@ module.exports = async function (context, req) {
       return send(context, 404, errorBody("NOT_FOUND", "Client site not found.", 404));
     }
 
-    // Server-constructed delta URL (SSRF-safe): the client-supplied value is used ONLY as the `token`
-    // query parameter on OUR drive-root delta URL. First page selects the projection the client renders;
-    // Graph carries $select across delta pages.
-    let nextUrl =
-      deltaToken === null
-        ? `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root/delta?$select=id,name,size,lastModifiedDateTime,webUrl,webDavUrl,folder,file,parentReference,deleted`
-        : `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root/delta?token=${encodeURIComponent(deltaToken)}`;
+    // Initial page: for a baseline (no token) the server constructs its OWN delta URL with the render
+    // projection; Graph carries $select across delta pages. With a token, the client round-tripped
+    // Graph's own deltaLink — validate it (host + THIS drive's /root/delta path) before following, so
+    // it can neither point elsewhere (SSRF) nor at a drive the caller didn't resolve.
+    let nextUrl;
+    if (deltaToken === null) {
+      nextUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root/delta?$select=id,name,size,lastModifiedDateTime,webUrl,webDavUrl,folder,file,parentReference,deleted`;
+    } else {
+      nextUrl = safeGraphDeltaUrl(deltaToken, driveId);
+      if (!nextUrl) {
+        return send(
+          context,
+          400,
+          errorBody("INVALID_REQUEST", "Query parameter 'deltaToken' is not a valid delta cursor for this drive.", 400)
+        );
+      }
+    }
 
     const changes = [];
     let newToken = null;
 
-    // Page through @odata.nextLink; the final page carries @odata.deltaLink (the next cursor). We
-    // reconstruct each subsequent page URL from the extracted token too (never fetch the raw link).
-    // Existence-disclosure-safe (API Spec §1): a delegated Graph 403/404 anywhere in the loop —
-    // including an inaccessible drive or an expired/invalid delta token (410 falls through to the
-    // generic known-error path) — maps to route 404, mirroring dms_tree's taxonomy. The client
-    // treats any dms_delta non-2xx as "drop the token and re-baseline" (call with no token).
+    // Page through @odata.nextLink; the final page carries @odata.deltaLink (the next cursor). Both are
+    // Graph's own links, followed VERBATIM after safeGraphDeltaUrl validation (handles ?token=,
+    // ?$skiptoken=, ?$deltatoken=, and the delta(token='…') function form). Existence-disclosure-safe
+    // (API Spec §1): a delegated Graph 403/404 anywhere in the loop — inaccessible drive, or an
+    // expired/invalid token (410 falls through to the generic known-error path) — maps to route 404,
+    // mirroring dms_tree. The client treats any dms_delta non-2xx as "drop the token and re-baseline".
     try {
       while (nextUrl) {
         const page = await graphGetJson(nextUrl, graphToken);
@@ -354,12 +382,11 @@ module.exports = async function (context, req) {
         const deltaLink = typeof page["@odata.deltaLink"] === "string" ? page["@odata.deltaLink"] : "";
 
         if (nextLink) {
-          const t = extractTokenParam(nextLink);
-          nextUrl = t
-            ? `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root/delta?token=${encodeURIComponent(t)}`
-            : null;
+          // A malformed/unexpected nextLink (fails validation) ends pagination safely rather than
+          // fetching an untrusted URL; the caller re-baselines next call if the set was truncated.
+          nextUrl = safeGraphDeltaUrl(nextLink, driveId);
         } else {
-          newToken = extractTokenParam(deltaLink);
+          newToken = safeGraphDeltaUrl(deltaLink, driveId);
           nextUrl = null;
         }
       }
