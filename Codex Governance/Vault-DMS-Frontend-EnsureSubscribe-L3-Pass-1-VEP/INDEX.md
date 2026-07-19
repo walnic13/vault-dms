@@ -7,7 +7,7 @@ Plan-only VEP. **Bug fix completing L3.** L3's receiver (MS3b `useDmsRealtime`) 
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: 5d9c95d3c98a7d7f9c66d7fa6f549cb1a70e7872 (development; the commit that first adds this VEP — presence probe resolves here and at every later commit; grounding reads were against parent 863e652)
+Turn issued against HEAD: 6054481a7f7109681aed2f0e268fd26919265ea3 (development; Pass-1 review round 2 — the commit with the T20-corrected full-literal CCT; package present here and at every later commit; grounding reads were against parent 863e652)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
