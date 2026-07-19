@@ -9,7 +9,7 @@ The Codex-APPROVED live-mirror change keeps its snapshot in-memory, so it surviv
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: 76219dffd51f2d8b44c59af31b7685159736d8a1 (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit; grounding reads were against parent c131111)
+Turn issued against HEAD: 79da6ef4ea67e872e1c71b2ac32f974f6b09dcf0 (development; the commit that carries this L1 rev3 VEP — T25 presence probe resolves there and at every later commit; grounding reads were against parent c131111)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
@@ -31,7 +31,7 @@ Current-turn grounding: Read the shipped `src/lib/dmsClient.ts` (blob `9c1608d`:
 Microstep: persist the existing SWR snapshot to sessionStorage (principal-namespaced) so instant paint also covers page reload (not just in-session context switches), WITHOUT weakening the live-mirror guarantee OR leaking one user's cache to another on a same-tab switch. In scope: `src/lib/dmsClient.ts` (namespaced sessionStorage + `setDmsPrincipal`) + `src/DmsBrowser.tsx` (resolve OID → bind principal → gate). Layer 2 (`dms_delta`, func-dms) and Layer 3 (change-notifications in func-chat) are separate packages.
 
 ## F-P2 — UI Authority Reconciliation
-- **VA-D1** (Vault DMS File Browser) — **VISUAL-AUTHORITY-MATCH.** No component touched; `DmsBrowser` is unchanged. Pure data-layer persistence of the snapshot the client already keeps. No new element, token, icon, indent, or interaction.
+- **VA-D1** (Vault DMS File Browser) — **VISUAL-AUTHORITY-MATCH.** `DmsBrowser` gains internal-only logic (resolve OID → bind principal → one-tick mount gate) + data-layer snapshot persistence; its prop interface, rendered elements, tokens, icons, indent, and interactions are unchanged. The only user-visible effect is instant paint on reload; no redesign.
 - No new VA.
 
 ## F-P2.5 — Gap Disclosure
