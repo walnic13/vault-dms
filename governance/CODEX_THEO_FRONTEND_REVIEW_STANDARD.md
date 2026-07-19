@@ -28,7 +28,7 @@ A failed hard gate ⇒ REJECTED with the trigger number; do not open substantive
 
 1. Codex's review turn opens with a GCR + Rule Anchor Table per Frontend Conformance §3/§5 and §4 (Codex | Pass 2 row).
 2. Codex verifies each §4A sub-phase declared is evidenced (T23), every structural/visual classification is anchored (T6), every quote is a literal HEAD substring (T7), and the grounding mode matches the turn type (T14/T17).
-3. Codex enforces the **surface-fidelity guardrails** (Frontend Conformance §6 T26): the reference surface is reproduced faithfully (no redesign); no direct browser→Anthropic/Foundry model call (gateway abstraction only); no `localStorage`/`sessionStorage`; no Tailwind/CSS-in-JS conversion in 1A; no change to `corporate-reporting`/`reporting_*`. A planned visual deviation is acceptable only if classified VISUAL-AUTHORITY-DEVIATION with a Rule Anchor.
+3. Codex enforces the **surface-fidelity guardrails** (Frontend Conformance §6 T26): the reference surface is reproduced faithfully (no redesign); no direct browser→Anthropic/Foundry model call (gateway abstraction only); no `localStorage`/`sessionStorage` **except the Walter-authorized DMS Snapshot Storage Exception (Governor §6.3 / Conformance T26) — scoped `sessionStorage` for the DMS remote's non-sensitive snapshot + delta cursor, which is NOT a trigger**; no Tailwind/CSS-in-JS conversion in 1A; no change to `corporate-reporting`/`reporting_*`. A planned visual deviation is acceptable only if classified VISUAL-AUTHORITY-DEVIATION with a Rule Anchor.
 4. Codex verifies the Gap Disclosure (or verbatim `NO-GAPS`) is present (T24).
 5. Any firing trigger ⇒ REJECTED, trigger cited by number.
 
