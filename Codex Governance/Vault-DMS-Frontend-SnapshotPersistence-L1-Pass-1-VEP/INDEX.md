@@ -9,7 +9,7 @@ The Codex-APPROVED live-mirror change keeps its snapshot in-memory, so it surviv
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: 79da6ef4ea67e872e1c71b2ac32f974f6b09dcf0 (development; the commit that carries this L1 rev3 VEP — T25 presence probe resolves there and at every later commit; grounding reads were against parent 0538c3a — which carries the DMS Snapshot Storage Exception (Governor §6.3) and the shipped dmsClient/DmsBrowser)
+Turn issued against HEAD: f5f6fb75f3f278c850ab049b6cd1b5e4183fb879 (development; the commit that carries this L1 rev3 VEP — T25 presence probe resolves there and at every later commit; grounding reads were against parent 0538c3a — which carries the DMS Snapshot Storage Exception (Governor §6.3) and the shipped dmsClient/DmsBrowser)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
