@@ -32,6 +32,44 @@ export interface DmsFileNode {
 
 export type DmsTreeNode = DmsFolderNode | DmsFileNode;
 
+// Stale-while-revalidate snapshot (Walter 2026-07-19). The DMS is a LIVE mirror of SharePoint, so
+// the browse functions below ALWAYS fetch fresh — nothing here serves stale data as authoritative.
+// This last-known snapshot exists ONLY so a host can paint the previously-loaded tree INSTANTLY on
+// re-entry (no blank "Loading clients…" flash) while the fresh fetch runs in the background and
+// updates it in place. Because hosts reconcile by item id, a background update patches only what
+// actually changed in SharePoint (new/removed/renamed files) and leaves expanded folders open —
+// "update what's there", not "reload the whole DMS". Populated on each SUCCESSFUL fetch; a
+// transient failure never overwrites the snapshot. Cleared on full page reload (sign-out / token
+// re-auth) or via clearDmsCache().
+let sitesCache: DmsClient[] | null = null;
+const treeCache = new Map<string, DmsTreeNode[]>();
+const treeKey = (siteId: string, parentItemId?: string) => `${siteId}|${parentItemId ?? ''}`;
+
+// Synchronous last-known snapshot for instant first paint (null ⇒ never loaded this session).
+export function getCachedSites(): DmsClient[] | null {
+  return sitesCache;
+}
+export function getCachedTree(siteId: string, parentItemId?: string): DmsTreeNode[] | null {
+  return treeCache.get(treeKey(siteId, parentItemId)) ?? null;
+}
+// Which nodes the user has expanded (client site_id or folder item_id). Lets a host restore the
+// EXACT tree shape on re-entry — expanded folders stay open — instead of returning collapsed, so a
+// background revalidate "updates what's there". Same session lifetime as the snapshot above.
+const expandedNodes = new Set<string>();
+export function isNodeExpanded(nodeKey: string): boolean {
+  return expandedNodes.has(nodeKey);
+}
+export function setNodeExpanded(nodeKey: string, expanded: boolean): void {
+  if (expanded) expandedNodes.add(nodeKey);
+  else expandedNodes.delete(nodeKey);
+}
+
+export function clearDmsCache(): void {
+  sitesCache = null;
+  treeCache.clear();
+  expandedNodes.clear();
+}
+
 function dmsApiBase(): string | null {
   const baseUrl = import.meta.env.VITE_DMS_API_BASE_URL;
   if (!baseUrl) {
@@ -61,9 +99,11 @@ export async function listDmsSites(getAccessToken: ShellTokenProvider): Promise<
   try { json = await res.json(); } catch { console.warn('[DMS] dms_list_sites malformed body'); return []; }
 
   const sites = json.data?.sites ?? [];
-  return sites
+  const mapped = sites
     .filter((s): s is { site_id: string; site_name?: string; web_url?: string } => !!s?.site_id)
     .map((s) => ({ clientKey: s.site_id, clientLabel: s.site_name ?? s.site_id }));
+  sitesCache = mapped; // SWR snapshot: successful fetch only
+  return mapped;
 }
 
 // GET dms_tree (§2.2) — siteId (required) + parentItemId (optional). Folders AND files; backend
@@ -96,11 +136,13 @@ export async function getDmsTree(
   try { json = await res.json(); } catch { console.warn('[DMS] dms_tree malformed body'); return []; }
 
   const children = json.data?.dms_tree?.children ?? [];
-  return children
+  const mapped = children
     .filter((n): n is { item_id: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string; web_dav_url?: string } => !!n?.item_id)
     .map((n): DmsTreeNode =>
       n.type === 'file'
         ? { kind: 'file', itemId: n.item_id, name: n.name ?? '(unnamed file)', webUrl: n.web_url ?? '', mimeType: n.mime_type, webDavUrl: n.web_dav_url }
         : { kind: 'folder', itemId: n.item_id, name: n.name ?? '(unnamed folder)', hasChildren: !!n.has_children },
     );
+  treeCache.set(treeKey(siteId, parentItemId), mapped); // SWR snapshot: successful fetch only
+  return mapped;
 }

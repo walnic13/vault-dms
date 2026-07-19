@@ -5,14 +5,22 @@
 // Origin's "Vault Files" rail. Adapted only for the remote contract: the host injects getAccessToken
 // and handles file clicks (onOpenFile) + folder picks (pickMode/onPickFolder); the shell owns the
 // rail's collapse/drag chrome. Browses func-dms (dms_list_sites / dms_tree) OBO.
-import { useCallback, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ChevronDown, ChevronRight, Database, File, FileArchive, FileSpreadsheet, FileText,
   Folder, FolderOpen, Image, Loader2, Presentation,
 } from 'lucide-react';
-import { getDmsTree, listDmsSites } from './lib/dmsClient';
+import { getCachedSites, getCachedTree, getDmsTree, isNodeExpanded, listDmsSites, setNodeExpanded } from './lib/dmsClient';
 import type { ShellTokenProvider, DmsClient, DmsTreeNode, DmsFileNode } from './lib/dmsClient';
+
+// Re-show revalidation nonce (App Host / VEP-B): the host keeps the DMS tree MOUNTED and merely
+// CSS-hides it when Vault Files is not the active rail context, so DmsBrowser never remounts on
+// re-show. When the host flips `active` back to true, DmsBrowser bumps this nonce; the mounted
+// Tree + every expanded TreeNode revalidate against live SharePoint and patch in place. This is the
+// re-show signal that keeps the mirror live under CSS-hidden re-entry (mount stability preserved).
+// 0 = initial mount (handled by the per-component mount fetch); >0 = a genuine re-show.
+const RevalidateContext = createContext(0);
 
 // File-type icon decoration (UI only) from the file's OWN extension — a presentational hint, not
 // recognition/routing/taxonomy. (Ported verbatim from DmsMirror.)
@@ -55,24 +63,52 @@ interface TreeNodeProps {
 }
 
 function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessToken, onOpenFile, pickMode, onPickFolder, parentName, webUrl, mimeType, webDavUrl }: TreeNodeProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [children, setChildren] = useState<DmsTreeNode[] | null>(null);
+  // Node identity for expansion persistence: folders by item_id, client roots by site_id.
+  const nodeKey = itemId ?? siteId;
+  // SWR + view-preservation: restore expansion from the session snapshot so the tree returns EXACTLY
+  // as the user left it; seed children from the last-known snapshot so it paints instantly (no
+  // per-folder "Loading…" flash). A background revalidate then patches in place (reconciled by
+  // itemId → new/removed files appear, expanded subfolders stay).
+  const [expanded, setExpanded] = useState(() => isNodeExpanded(nodeKey));
+  const [children, setChildren] = useState<DmsTreeNode[] | null>(() => getCachedTree(siteId, itemId));
   const [loading, setLoading] = useState(false);
+  const revalidateNonce = useContext(RevalidateContext);
 
   const loadChildren = useCallback(async () => {
-    setLoading(true);
+    // Spinner only when we have nothing cached to show; otherwise the cached children stay visible
+    // while the fresh fetch patches them in place (reconciled by itemId → expanded subfolders stay).
+    if (getCachedTree(siteId, itemId) === null) setLoading(true);
     const nodes = await getDmsTree(siteId, itemId, getAccessToken);
     setChildren(nodes);
     setLoading(false);
   }, [siteId, itemId, getAccessToken]);
 
+  // On (re)mount, revalidate any node restored as expanded — cached children (if any) already show,
+  // this refreshes them against live SharePoint. Mount-only; expand/collapse is handled by toggle.
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (didMountRef.current) return;
+    didMountRef.current = true;
+    if (expanded) void loadChildren();
+  }, [expanded, loadChildren]);
+
+  // Re-show revalidation (nonce > 0): the host re-showed the tree without a remount. If this node is
+  // expanded, refetch its children against live SharePoint and patch in place (reconciled by itemId
+  // → new/removed files appear, expanded subfolders stay). Collapsed nodes refetch lazily on expand.
+  useEffect(() => {
+    if (revalidateNonce === 0) return;
+    if (expanded) void loadChildren();
+  }, [revalidateNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggle = useCallback(() => {
     setExpanded((prev) => {
       const next = !prev;
-      if (next && children === null && !loading) void loadChildren();
+      setNodeExpanded(nodeKey, next); // persist for re-entry
+      // Revalidate on every expand (live mirror); cached children (if any) are already shown.
+      if (next && !loading) void loadChildren();
       return next;
     });
-  }, [children, loading, loadChildren]);
+  }, [nodeKey, loading, loadChildren]);
 
   const onLabelClick = useCallback(() => {
     if (kind === 'file') {
@@ -168,6 +204,11 @@ export interface DmsBrowserProps {
   onOpenFile?: (node: DmsFileNode) => void;
   pickMode?: boolean;
   onPickFolder?: (pick: { siteId: string; itemId: string; name: string; parentName?: string }) => void;
+  // Re-show signal (optional; App Host / VEP-B). A host that keeps the tree MOUNTED and CSS-hides it
+  // (Origin app-rail) sets this true when Vault Files is the active context. Each false→true flip
+  // revalidates the mounted tree against live SharePoint (no remount needed). Omitted/false ⇒ the
+  // tree still revalidates on its own mount + on folder expand (back-compatible for other hosts).
+  active?: boolean;
 }
 
 function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder, showHeader }: {
@@ -177,15 +218,31 @@ function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder, showHeader }
   onPickFolder?: (p: { siteId: string; itemId: string; name: string; parentName?: string }) => void;
   showHeader: boolean;
 }) {
-  const [clients, setClients] = useState<DmsClient[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Stale-while-revalidate: paint the last-known client list INSTANTLY on (re)mount so there is no
+  // blank "Loading clients…" flash when a host re-shows the tree, then always refetch to keep the
+  // mirror live and patch in place (React reconciles clients by clientKey → unchanged clients keep
+  // their expansion; only real SharePoint changes appear/disappear).
+  const [clients, setClients] = useState<DmsClient[] | null>(() => getCachedSites());
+  const [loading, setLoading] = useState(getCachedSites() === null);
+  const revalidateNonce = useContext(RevalidateContext);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    // Spinner only when nothing is cached to show; a cached snapshot stays visible during revalidate.
+    if (getCachedSites() === null) setLoading(true);
     void listDmsSites(getAccessToken).then((list) => { if (active) { setClients(list); setLoading(false); } });
     return () => { active = false; };
   }, [getAccessToken]);
+
+  // Re-show revalidation (nonce > 0): the host re-showed Vault Files without a remount — refetch the
+  // site list against live SharePoint and patch in place (reconciled by clientKey; no spinner, the
+  // current list stays visible). Nonce 0 is the initial mount, already covered by the effect above.
+  useEffect(() => {
+    if (revalidateNonce === 0) return;
+    let active = true;
+    void listDmsSites(getAccessToken).then((list) => { if (active) setClients(list); });
+    return () => { active = false; };
+  }, [revalidateNonce, getAccessToken]);
 
   return (
     <div className="flex flex-col h-full min-h-0 font-sans text-theo-ink">
@@ -229,12 +286,22 @@ function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder, showHeader }
   );
 }
 
-export default function DmsBrowser({ navSlot, getAccessToken, onOpenFile, pickMode, onPickFolder }: DmsBrowserProps) {
+export default function DmsBrowser({ navSlot, getAccessToken, onOpenFile, pickMode, onPickFolder, active }: DmsBrowserProps) {
   const open = (n: DmsFileNode) => {
     if (onOpenFile) { onOpenFile(n); return; }
     if (n.webUrl) window.open(n.webUrl, '_blank', 'noopener,noreferrer');
   };
-  const tree = <Tree getAccessToken={getAccessToken} onOpenFile={open} pickMode={!!pickMode} onPickFolder={onPickFolder} showHeader={!navSlot} />;
+  // Re-show revalidation: each false→true flip of `active` bumps the nonce so the mounted Tree +
+  // expanded TreeNodes refetch against live SharePoint (the CSS-hidden re-entry fix; no remount).
+  const [revalidateNonce, setRevalidateNonce] = useState(0);
+  useEffect(() => {
+    if (active) setRevalidateNonce((n) => n + 1);
+  }, [active]);
+  const tree = (
+    <RevalidateContext.Provider value={revalidateNonce}>
+      <Tree getAccessToken={getAccessToken} onOpenFile={open} pickMode={!!pickMode} onPickFolder={onPickFolder} showHeader={!navSlot} />
+    </RevalidateContext.Provider>
+  );
 
   // Hosted: the shell owns the collapsible/draggable rail; we portal the tree into its navSlot.
   if (navSlot) return createPortal(tree, navSlot);
