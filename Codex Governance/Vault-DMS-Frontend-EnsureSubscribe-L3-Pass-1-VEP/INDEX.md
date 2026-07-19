@@ -1,0 +1,77 @@
+# Vault DMS Frontend — Layer 3: ensure-subscribe on drive view (turns push ON) — Pass-1 Frontend Verified Evidence Pack
+
+Plan-only VEP. **Bug fix completing L3.** L3's receiver (MS3b `useDmsRealtime`) is live — it joins `dms-changes` and revalidates on a `dms_changed` ping — but nothing ever asks Graph to WATCH the drive being viewed, so no notification is ever generated and the receiver has nothing to react to. (Verified live: a SharePoint delete did NOT push; a manual refresh cleared it — the delta path works, only the subscription was never created.) MS1's `dms_subscribe` was designed to be *"called by the DMS remote when a drive is first viewed"*; this VEP wires that missing call. When a client drive's root is opened, the FE captures the `drive_id` (already returned by `dms_tree` §2.2, currently discarded) and calls the deployed, receive-verified `dms_subscribe({siteId, driveId})` (idempotent) — so Graph begins notifying and the existing receiver → `dms_delta` patch fires. Scope: `src/lib/dmsClient.ts` (capture+store `drive_id`; export getter), `src/lib/dmsRealtime.ts` (`ensureDmsSubscription`), `src/DmsBrowser.tsx` (invoke on client-root load). No visual/render change, no `DmsBrowserProps` change, no new endpoint (`dms_subscribe` deployed + golden-verified). Reviewer: Codex (FE).
+
+## Grounding Conformance Receipt
+
+```
+Role: Claude Code
+Turn Type: Pass 1 — Frontend Verified Evidence Pack
+Turn issued against HEAD: 863e652609edab890ecfe936981890eb5d012c19
+Grounding Mode: Full Baseline Grounding
+Pass: Pass 1
+Sub-phase Track: N/A
+```
+
+(Frontend sub-phase track = F-P1–F-P7 per Frontend Conformance §4A.1, walked below.)
+
+Current-turn grounding: Read the shipped `src/lib/dmsClient.ts` (`getDmsTree` root call captures `dms_tree.parent.item_id` as `rootItemId` but DISCARDS the sibling `dms_tree.drive_id`; per-site namespaced snapshot with `rootItemIds`/`deltaTokens` maps + getters/setters) and `src/lib/dmsRealtime.ts` (`useDmsRealtime`; `negotiateDmsRealtime` uses `VITE_DMS_REALTIME_BASE_URL` = func-chat) and `src/DmsBrowser.tsx` (`TreeNode.loadChildren` → `getDmsTree`; client node = `kind:'client'`, root call `itemId` undefined). Confirmed by grep that `src/` never references `dms_subscribe` or `drive_id`. Verified the deployed `dms_tree` (`spec/VAULT_DMS_API_SPEC.md` §2.2) response includes `drive_id`, and the deployed `dms_subscribe` (vault-theo `spec/THEO_API_SPEC.md` §2.13) accepts `{ siteId, driveId }` (golden-verified this session: create 201 / idempotent 200). Read `governance/THEO_FRONTEND_GROUNDING_CONFORMANCE_STANDARD.md` §4B, `governance/THEO_GOLDEN_COMPONENT_PACK_STANDARD.md` §7.
+
+## Rule Anchor Table
+
+| Source doc (absolute path) | Clause id | Verbatim clause text | Applied in output at |
+|-------------------|-----------|----------------------|----------------------|
+| c:/Users/WalterMansfield/Vault Group LLP/Innovate - Documents/Tax Workpapers Project/2026/vault-dms/governance/THEO_GOLDEN_COMPONENT_PACK_STANDARD.md | §7 | "reproduced faithfully, no redesign" | F-P2 — data-flow only; no component/render change (VA-D1 match) |
+| c:/Users/WalterMansfield/Vault Group LLP/Innovate - Documents/Tax Workpapers Project/2026/vault-dms/governance/THEO_FRONTEND_GROUNDING_CONFORMANCE_STANDARD.md | §4B | "MUST be registered here before it may be cited." | VA-D1 (Vault DMS File Browser) — the only VA touched (no render change) |
+| c:/Users/WalterMansfield/Vault Group LLP/Innovate - Documents/Tax Workpapers Project/2026/vault-dms/spec/VAULT_DMS_API_SPEC.md | §2.2 | "site_id, drive_id, parent" | F-P3 — `dms_tree` already returns `drive_id`; the FE now captures it (no extra call) |
+| c:/Users/WalterMansfield/Vault Group LLP/Innovate - Documents/Tax Workpapers Project/2026/vault-theo/spec/THEO_API_SPEC.md | §2.13 | "ensure a Graph change-subscription for a DMS drive" | F-P3 — the deployed `dms_subscribe` the FE now calls on drive view |
+
+## F-P1 — Feature identification
+Microstep: turn L3 push ON by ensuring a Graph subscription exists for each viewed drive. In scope: `src/lib/dmsClient.ts` (capture `dms_tree.drive_id` on the root call → per-site namespaced store + `getDriveId`), `src/lib/dmsRealtime.ts` (`ensureDmsSubscription(siteId, getAccessToken)` — idempotent POST to the deployed `dms_subscribe`, once-per-site guarded, fire-and-forget), `src/DmsBrowser.tsx` (call `ensureDmsSubscription` when a client node's root children load). Fixes the MS3b gap (receiver shipped without the subscribe trigger).
+
+## F-P2 — UI Authority Reconciliation
+- **VA-D1** (Vault DMS File Browser) — **VISUAL-AUTHORITY-MATCH.** No new element, token, icon, indent, interaction, or status indicator. Purely a background side-effect (a POST that registers a Graph subscription) fired when a drive root loads; the tree renders identically.
+- No new VA.
+
+## F-P2.5 — Gap Disclosure
+**PROCEED.** (1) **This is the fix that makes L3 work** — without it Graph never notifies and MS3b's listener is inert. (2) **`drive_id` source is contract-grounded + free** — `dms_tree` §2.2 already returns `data.dms_tree.drive_id` on every call (currently discarded); the root call (`parentItemId` undefined, the client node) captures it alongside the existing `rootItemId` capture — no extra request. (3) **Idempotent + guarded** — `dms_subscribe` is idempotent (returns `refreshed:false` when a live subscription exists); a module-level `Set` ensures at most one POST per site per session, so re-renders/re-expands don't spam it. (4) **Fire-and-forget + graceful** — all errors swallowed; no `VITE_DMS_REALTIME_BASE_URL` (standalone/Sigma) → no-op; a subscribe failure never affects browse/delta. (5) **App-level subscription, per-user trimming intact** — `dms_subscribe` creates ONE app-level subscription per drive (shared); the CHANGE signal stays trigger-only and each client still pulls its OWN delegated `dms_delta` (unchanged). (6) **Cross-origin** — the POST goes to func-chat (`VITE_DMS_REALTIME_BASE_URL`), same base as the working `dms_negotiate`; `dms_subscribe` CORS is `Access-Control-Allow-Origin: *` with `POST, OPTIONS`. No new endpoint / no `func-dms` change / no vault-dms API-Spec change. No PRE-LAND / ESCALATE.
+
+## F-P3 — Contract grounding
+Captures `data.dms_tree.drive_id` from the deployed **`dms_tree`** (`spec/VAULT_DMS_API_SPEC.md` §2.2 — already in the response). Calls the deployed **`dms_subscribe`** (vault-theo `spec/THEO_API_SPEC.md` §2.13): `POST /api/dms_subscribe` `{ siteId, driveId }` → 201 (created) / 200 (`refreshed:false`, idempotent) on func-chat (`${VITE_DMS_REALTIME_BASE_URL}`). No `func-dms`/endpoint/spec change.
+
+## F-P4 — Component reference grounding (Primary Reference)
+**PRIMARY REFERENCE: the shipped `src/lib/dmsClient.ts` + `src/lib/dmsRealtime.ts` + `src/DmsBrowser.tsx`** (the edited surfaces). `ensureDmsSubscription`'s fetch idiom mirrors the shipped `negotiateDmsRealtime`/`listDmsSites` (Bearer GET/POST, try-guarded, null-safe). Not GREENFIELD.
+
+## F-P5 — Component Contract Table
+
+| Component (ownership) | Prop / input interface (TypeScript — full literal) | Visual authority | Data / contract dependency | Impl eligibility |
+|---|---|---|---|---|
+| `dmsClient` module (`lib/dmsClient.ts`; ACTIVE, modify) | **Added exports (literal):** `export function getDriveId(siteId: string): string \| null;` `export function setDriveId(siteId: string, driveId: string): void;` — a per-site `drive_id` in the principal-namespaced snapshot (new `ss` key `driveIds`, cleared by `clearDmsCache`), mirroring `getRootItemId`/`setRootItemId`. Behavior: `getDmsTree`'s ROOT call (`parentItemId === undefined`) now also reads `json.data.dms_tree.drive_id` (string) → `setDriveId(siteId, …)`, alongside the existing `parent.item_id` → `setRootItemId` capture (signature UNCHANGED). All other exports UNCHANGED. | VA-D1 (no render) | `dms_tree` §2.2 `drive_id` (deployed) | PROCEED |
+| `dmsRealtime` module (`lib/dmsRealtime.ts`; ACTIVE, modify) | **Added export (literal):** `export async function ensureDmsSubscription(siteId: string, getAccessToken: ShellTokenProvider): Promise<void>;` — reads `getDriveId(siteId)` (imported from `./dmsClient`); if null → return; if already in the module `ensuredSites: Set<string>` → return; else POST `${import.meta.env.VITE_DMS_REALTIME_BASE_URL}/api/dms_subscribe` with `Authorization: Bearer` + JSON `{ siteId, driveId }`; on a 2xx add to `ensuredSites`; all failures swallowed (never throws; body/token never logged). Existing `useDmsRealtime`/`negotiateDmsRealtime` UNCHANGED. | VA-D1 (no render) | `dms_subscribe` §2.13 (deployed) | PROCEED |
+| `DmsBrowser` / internal `TreeNode` (`DmsBrowser.tsx`; ACTIVE, modify — call site only) | `DmsBrowserProps` + `TreeNodeProps` **UNCHANGED** (full literal): <br>`export interface DmsBrowserProps { navSlot?: HTMLElement \| null; getAccessToken: ShellTokenProvider; onOpenFile?: (node: DmsFileNode) => void; pickMode?: boolean; onPickFolder?: (pick: { siteId: string; itemId: string; name: string; parentName?: string }) => void; active?: boolean }`<br>`interface TreeNodeProps { siteId: string; itemId?: string; label: string; hasChildren: boolean; depth: number; kind: 'client' \| 'folder' \| 'file'; getAccessToken: ShellTokenProvider; onOpenFile: (node: DmsFileNode) => void; pickMode: boolean; onPickFolder?: (pick: { siteId: string; itemId: string; name: string; parentName?: string }) => void; parentName?: string; webUrl?: string; mimeType?: string; webDavUrl?: string; }`<br>Internal ONLY: inside `TreeNode.loadChildren`, after the `await getDmsTree(...)`, when `kind === 'client'` call `void ensureDmsSubscription(siteId, getAccessToken)` (drive_id is now stored by the root `getDmsTree`). No prop/render change. | VA-D1 | via `dmsClient` + `dmsRealtime` | PROCEED |
+
+No `any`. Prop interfaces UNCHANGED; the change is the additive `drive_id` capture + the idempotent ensure-subscribe call.
+
+## Component Structural Mirror Table (F-I2)
+
+| Region (vault-dms FE) | Primary Reference | Classification |
+|---|---|---|
+| `dmsClient` `+ getDriveId/setDriveId` + `getDmsTree` root captures `dms_tree.drive_id` | shipped `dmsClient.ts` (`getRootItemId`/`setRootItemId` + `parent.item_id` capture) | ALLOWED DELTA (identical per-site namespaced-store idiom, `drive_id` instead of `rootItemId`; capture from the same root response) |
+| `dmsRealtime` `+ ensureDmsSubscription` (Bearer POST `dms_subscribe`, guarded, fire-and-forget) | shipped `dmsRealtime.ts` `negotiateDmsRealtime` + `dmsClient` fetch idiom | ALLOWED DELTA (same fetch/null-safe idiom; POST `dms_subscribe` instead of GET `dms_negotiate`) |
+| `TreeNode.loadChildren` `+ if (kind==='client') void ensureDmsSubscription(...)` | shipped `DmsBrowser.tsx` `loadChildren` | ALLOWED DELTA (additive side-effect after the existing root load; no render/interaction change) |
+
+## F-P6 — Repository & active-surface grounding
+Target files (Read this turn): `src/lib/dmsClient.ts`, `src/lib/dmsRealtime.ts`, `src/DmsBrowser.tsx`. Guardrails: no visual/render change; `DmsBrowserProps`/`TreeNodeProps` unchanged; `ensureDmsSubscription` idempotent + once-per-site-guarded + fire-and-forget (never throws, never blocks browse); graceful no-op when `VITE_DMS_REALTIME_BASE_URL` unset; per-user trimming preserved (change signal trigger-only; each client pulls its OWN `dms_delta`); `drive_id` sourced only from the deployed §2.2 response; no `func-dms`/endpoint/vault-dms-API-Spec change; the namespaced-snapshot storage stays within the DMS Snapshot Storage Exception (metadata only).
+
+## F-P7 — Plan body (Pass-3, on APPROVAL)
+1. **`dmsClient.ts`** — add `driveIds` Map + `getDriveId`/`setDriveId` (namespaced `ss` key `driveIds`, hydrated in `setDmsPrincipal`, cleared in `clearDmsCache` + `ssClear`). In `getDmsTree`'s root branch (`parentItemId === undefined`), after the `parent.item_id` capture, read `json.data?.dms_tree?.drive_id` → `setDriveId(siteId, …)` when a non-empty string.
+2. **`dmsRealtime.ts`** — add module `const ensuredSites = new Set<string>()` + `ensureDmsSubscription(siteId, getAccessToken)` (import `getDriveId` from `./dmsClient`): guard on driveId presence + `ensuredSites`; POST `${import.meta.env.VITE_DMS_REALTIME_BASE_URL}/api/dms_subscribe` `{ siteId, driveId }` with Bearer; add to `ensuredSites` on 2xx; swallow all errors.
+3. **`DmsBrowser.tsx`** — import `ensureDmsSubscription`; in `TreeNode.loadChildren`, after `setChildren(nodes)`, `if (kind === 'client') void ensureDmsSubscription(siteId, getAccessToken)`.
+4. **Verify**: `vite build` green; open Vault Files → expand a client → Network shows one `dms_subscribe` (201 first time, 200 idempotent thereafter) to func-chat; then delete/rename a file in SharePoint in that drive → within a few seconds the tree patches IN PLACE with no manual refresh (the receiver now has a subscription to react to); no `dms_subscribe` spam on re-expand (guarded).
+5. **Deploy**: build + publish the DMS remote to the dev SWA (env unchanged — `VITE_DMS_REALTIME_BASE_URL` already set in MS3b); Origin/Sigma consume the updated `remoteEntry.js`. Walter re-verifies.
+
+## Mechanical lint
+Command: `node tools/lint_microstep_submission.mjs "Codex Governance/Vault-DMS-Frontend-EnsureSubscribe-L3-Pass-1-VEP/INDEX.md" --repo-root .` — expect `PASS`.
+
+## Requested action
+Codex Pass-2 review against Frontend Conformance §6 + the Golden Component Pack. Plan-only. On APPROVED, Claude Code executes Pass-3 per F-P7 on `development` and publishes the DMS remote to the dev SWA — completing L3 so live push actually fires on a SharePoint change without a manual refresh.
