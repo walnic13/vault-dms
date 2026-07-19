@@ -32,42 +32,97 @@ export interface DmsFileNode {
 
 export type DmsTreeNode = DmsFolderNode | DmsFileNode;
 
-// Stale-while-revalidate snapshot (Walter 2026-07-19). The DMS is a LIVE mirror of SharePoint, so
-// the browse functions below ALWAYS fetch fresh — nothing here serves stale data as authoritative.
-// This last-known snapshot exists ONLY so a host can paint the previously-loaded tree INSTANTLY on
-// re-entry (no blank "Loading clients…" flash) while the fresh fetch runs in the background and
-// updates it in place. Because hosts reconcile by item id, a background update patches only what
-// actually changed in SharePoint (new/removed/renamed files) and leaves expanded folders open —
-// "update what's there", not "reload the whole DMS". Populated on each SUCCESSFUL fetch; a
-// transient failure never overwrites the snapshot. Cleared on full page reload (sign-out / token
-// re-auth) or via clearDmsCache().
-let sitesCache: DmsClient[] | null = null;
-const treeCache = new Map<string, DmsTreeNode[]>();
+// Stale-while-revalidate snapshot (Walter 2026-07-19; Layer 1). The DMS is a LIVE mirror of
+// SharePoint, so the browse functions below ALWAYS fetch fresh — nothing here serves stale data as
+// authoritative. This last-known snapshot exists ONLY so a host can paint the previously-loaded
+// tree INSTANTLY (no blank "Loading clients…" flash) while the fresh fetch runs in the background
+// and patches it in place (reconciled by item id → only real SharePoint changes appear; expanded
+// folders stay open). Populated on each SUCCESSFUL fetch; a transient failure never overwrites it.
+//
+// PERSISTENCE (Layer 1): the snapshot is mirrored to sessionStorage so it also survives a PAGE
+// RELOAD within the same tab (the reload-from-scratch case), not just in-session context switches.
+// sessionStorage is per-tab and cleared when the tab closes — the session boundary — and is wiped
+// explicitly on sign-out via clearDmsCache(). This is OneDrive's "local cache for instant paint"
+// layer; it never bypasses revalidation, so the mirror stays live. All access is try/guarded: if
+// sessionStorage is unavailable (quota/privacy mode) the in-memory snapshot still works.
+const SS_PREFIX = 'vault-dms:v1:';
+// The persisted snapshot is NAMESPACED by the authenticated principal (Entra OID) so a different
+// user signing in on the SAME tab can never instant-paint the prior user's cached DMS metadata.
+// Until the principal is bound (setDmsPrincipal), sessionStorage I/O is disabled — in-memory only,
+// the safe default. sessionStorage is still per-tab and cleared on tab close.
+let principal = '';
+const ssKey = (key: string) => `${SS_PREFIX}${principal}:${key}`;
+function ssGet<T>(key: string): T | null {
+  if (!principal) return null;
+  try {
+    const raw = sessionStorage.getItem(ssKey(key));
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+function ssSet(key: string, val: unknown): void {
+  if (!principal) return;
+  try {
+    sessionStorage.setItem(ssKey(key), JSON.stringify(val));
+  } catch {
+    /* quota exceeded / storage unavailable — in-memory snapshot remains authoritative */
+  }
+}
+function ssClear(): void {
+  if (!principal) return;
+  try {
+    for (const k of ['sites', 'tree', 'expanded']) sessionStorage.removeItem(ssKey(k));
+  } catch {
+    /* ignore */
+  }
+}
+
 const treeKey = (siteId: string, parentItemId?: string) => `${siteId}|${parentItemId ?? ''}`;
 
-// Synchronous last-known snapshot for instant first paint (null ⇒ never loaded this session).
+// In-memory snapshot. NOT hydrated at module load (the principal is unknown then); it is hydrated
+// per-principal by setDmsPrincipal, and populated on each successful fetch.
+let sitesCache: DmsClient[] | null = null;
+const treeCache = new Map<string, DmsTreeNode[]>();
+const expandedNodes = new Set<string>();
+
+// Bind the cache to the authenticated principal (OID). On a new/first-seen principal, re-hydrate the
+// in-memory snapshot from THAT principal's sessionStorage namespace (empty for a first-seen user) —
+// so a same-tab user switch shows the new user's own view, never the prior user's. Idempotent.
+export function setDmsPrincipal(id: string): void {
+  const next = id || '';
+  if (next === principal) return;
+  principal = next;
+  sitesCache = ssGet<DmsClient[]>('sites');
+  treeCache.clear();
+  for (const [k, v] of ssGet<[string, DmsTreeNode[]][]>('tree') ?? []) treeCache.set(k, v);
+  expandedNodes.clear();
+  for (const n of ssGet<string[]>('expanded') ?? []) expandedNodes.add(n);
+}
+
+// Synchronous last-known snapshot for instant first paint (null ⇒ never loaded).
 export function getCachedSites(): DmsClient[] | null {
   return sitesCache;
 }
 export function getCachedTree(siteId: string, parentItemId?: string): DmsTreeNode[] | null {
   return treeCache.get(treeKey(siteId, parentItemId)) ?? null;
 }
-// Which nodes the user has expanded (client site_id or folder item_id). Lets a host restore the
-// EXACT tree shape on re-entry — expanded folders stay open — instead of returning collapsed, so a
-// background revalidate "updates what's there". Same session lifetime as the snapshot above.
-const expandedNodes = new Set<string>();
+// Which nodes the user has expanded (client site_id or folder item_id) — lets a host restore the
+// EXACT tree shape on re-entry / reload (expanded folders stay open) instead of returning collapsed.
 export function isNodeExpanded(nodeKey: string): boolean {
   return expandedNodes.has(nodeKey);
 }
 export function setNodeExpanded(nodeKey: string, expanded: boolean): void {
   if (expanded) expandedNodes.add(nodeKey);
   else expandedNodes.delete(nodeKey);
+  ssSet('expanded', [...expandedNodes]);
 }
 
 export function clearDmsCache(): void {
   sitesCache = null;
   treeCache.clear();
   expandedNodes.clear();
+  ssClear();
 }
 
 function dmsApiBase(): string | null {
@@ -103,6 +158,7 @@ export async function listDmsSites(getAccessToken: ShellTokenProvider): Promise<
     .filter((s): s is { site_id: string; site_name?: string; web_url?: string } => !!s?.site_id)
     .map((s) => ({ clientKey: s.site_id, clientLabel: s.site_name ?? s.site_id }));
   sitesCache = mapped; // SWR snapshot: successful fetch only
+  ssSet('sites', mapped);
   return mapped;
 }
 
@@ -144,5 +200,6 @@ export async function getDmsTree(
         : { kind: 'folder', itemId: n.item_id, name: n.name ?? '(unnamed folder)', hasChildren: !!n.has_children },
     );
   treeCache.set(treeKey(siteId, parentItemId), mapped); // SWR snapshot: successful fetch only
+  ssSet('tree', [...treeCache]);
   return mapped;
 }

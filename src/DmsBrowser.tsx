@@ -11,8 +11,23 @@ import {
   ChevronDown, ChevronRight, Database, File, FileArchive, FileSpreadsheet, FileText,
   Folder, FolderOpen, Image, Loader2, Presentation,
 } from 'lucide-react';
-import { getCachedSites, getCachedTree, getDmsTree, isNodeExpanded, listDmsSites, setNodeExpanded } from './lib/dmsClient';
+import { getCachedSites, getCachedTree, getDmsTree, isNodeExpanded, listDmsSites, setDmsPrincipal, setNodeExpanded } from './lib/dmsClient';
 import type { ShellTokenProvider, DmsClient, DmsTreeNode, DmsFileNode } from './lib/dmsClient';
+
+// Best-effort OID from the access token payload — used ONLY to namespace the client-side snapshot
+// cache per authenticated principal (never for auth; the backend still validates the token). No
+// signature check needed for a cache key. base64url-safe; returns '' on anything unexpected.
+function oidFromToken(token: string | null): string {
+  if (!token) return '';
+  try {
+    const part = token.split('.')[1];
+    if (!part) return '';
+    const json = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
+    return (json.oid as string) || (json.sub as string) || '';
+  } catch {
+    return '';
+  }
+}
 
 // Re-show revalidation nonce (App Host / VEP-B): the host keeps the DMS tree MOUNTED and merely
 // CSS-hides it when Vault Files is not the active rail context, so DmsBrowser never remounts on
@@ -291,12 +306,33 @@ export default function DmsBrowser({ navSlot, getAccessToken, onOpenFile, pickMo
     if (onOpenFile) { onOpenFile(n); return; }
     if (n.webUrl) window.open(n.webUrl, '_blank', 'noopener,noreferrer');
   };
+  // Bind the snapshot cache to the signed-in principal (OID) BEFORE seeding the tree from it, so a
+  // same-tab user switch can never instant-paint the prior user's cached metadata. Held for one
+  // token-decode tick (no network); the slot stays empty (as it was) until the principal is bound,
+  // then Tree seeds from the correctly-namespaced snapshot. Only affects initial mount — the mounted
+  // tree persists across context switches (re-show uses the `active` nonce).
+  const [principalReady, setPrincipalReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void getAccessToken()
+      // Guard the principal mutation itself (not just the ready flag): a stale token promise from a
+      // superseded auth context / unmounted instance must NOT rebind the module-global cache
+      // principal after a user switch.
+      .then((tok) => { if (alive) setDmsPrincipal(oidFromToken(tok)); })
+      .finally(() => { if (alive) setPrincipalReady(true); });
+    return () => { alive = false; };
+  }, [getAccessToken]);
+
   // Re-show revalidation: each false→true flip of `active` bumps the nonce so the mounted Tree +
   // expanded TreeNodes refetch against live SharePoint (the CSS-hidden re-entry fix; no remount).
   const [revalidateNonce, setRevalidateNonce] = useState(0);
   useEffect(() => {
     if (active) setRevalidateNonce((n) => n + 1);
   }, [active]);
+
+  // Gate: hold the tree until the principal is bound (all hooks above run first — order stable).
+  if (!principalReady) return navSlot ? createPortal(null, navSlot) : null;
+
   const tree = (
     <RevalidateContext.Provider value={revalidateNonce}>
       <Tree getAccessToken={getAccessToken} onOpenFile={open} pickMode={!!pickMode} onPickFolder={onPickFolder} showHeader={!navSlot} />
