@@ -81,7 +81,7 @@ Filename / location: `spec/VAULT_DMS_API_SPEC.md`.
 | Success | `{ data: { dms_delta: { site_id, drive_id, baseline, changes: [ { item_id, parent_id, deleted, type?:"folder"\|"file", name?, size?, date_modified?, web_url?, has_children? (folders), mime_type?/web_dav_url? (files) } ], delta_token } } }` |
 | Errors | 400 invalid siteId/deltaToken; 401 EasyAuth/OBO; 404 site/drive not accessible (delegated Graph 403/404 → 404, existence-disclosure-safe); 500 other (incl. expired delta token → Graph 410). The client treats any non-2xx as drop-token-and-re-baseline. |
 | Primary reference | `reporting_dms_tree` (OBO + `/sites/{id}/drive` resolution + `@odata.nextLink` pagination). **Delta:** the Graph `/drives/{id}/root/delta` endpoint (Walter-authorized 2026-07-19); client-held opaque Graph cursor (stateless); SSRF-safe — Graph links followed verbatim only after host + this-drive `/root/delta` path validation. |
-| Status | `proposed` |
+| Status | `deployed` |
 
 ---
 
