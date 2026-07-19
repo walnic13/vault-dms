@@ -88,7 +88,7 @@ function ssSet(key: string, val: unknown): void {
 function ssClear(): void {
   if (!principal) return;
   try {
-    for (const k of ['sites', 'tree', 'expanded', 'deltaTokens', 'rootItemIds']) sessionStorage.removeItem(ssKey(k));
+    for (const k of ['sites', 'tree', 'expanded', 'deltaTokens', 'rootItemIds', 'driveIds']) sessionStorage.removeItem(ssKey(k));
   } catch {
     /* ignore */
   }
@@ -107,6 +107,10 @@ const expandedNodes = new Set<string>();
 // Snapshot Storage Exception (Governor §6.3); persisted per-principal like the rest of the snapshot.
 const deltaTokens = new Map<string, string>();
 const rootItemIds = new Map<string, string>();
+// Layer 3: per-site drive id (the §2.2 dms_tree.drive_id) — used to ensure a Graph change-notification
+// subscription (dms_subscribe) for the drive when a client is viewed. Persisted per-principal like the
+// rest of the snapshot (metadata only — DMS Snapshot Storage Exception, Governor §6.3).
+const driveIds = new Map<string, string>();
 
 // Bind the cache to the authenticated principal (OID). On a new/first-seen principal, re-hydrate the
 // in-memory snapshot from THAT principal's sessionStorage namespace (empty for a first-seen user) —
@@ -124,6 +128,8 @@ export function setDmsPrincipal(id: string): void {
   for (const [k, v] of ssGet<[string, string][]>('deltaTokens') ?? []) deltaTokens.set(k, v);
   rootItemIds.clear();
   for (const [k, v] of ssGet<[string, string][]>('rootItemIds') ?? []) rootItemIds.set(k, v);
+  driveIds.clear();
+  for (const [k, v] of ssGet<[string, string][]>('driveIds') ?? []) driveIds.set(k, v);
 }
 
 // Synchronous last-known snapshot for instant first paint (null ⇒ never loaded).
@@ -162,6 +168,17 @@ export function setRootItemId(siteId: string, itemId: string): void {
   if (itemId) {
     rootItemIds.set(siteId, itemId);
     ssSet('rootItemIds', [...rootItemIds]);
+  }
+}
+// Layer 3 — per-site drive id (the §2.2 dms_tree.drive_id). Consumed by ensureDmsSubscription to
+// create the Graph change-notification subscription for the drive being viewed.
+export function getDriveId(siteId: string): string | null {
+  return driveIds.get(siteId) ?? null;
+}
+export function setDriveId(siteId: string, driveId: string): void {
+  if (driveId) {
+    driveIds.set(siteId, driveId);
+    ssSet('driveIds', [...driveIds]);
   }
 }
 
@@ -234,7 +251,7 @@ export async function getDmsTree(
   if (!res.ok) { console.warn(`[DMS] dms_tree returned ${res.status}`); return []; }
 
   let json: {
-    data?: { dms_tree?: { parent?: { item_id?: string }; children?: Array<{ item_id?: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string; web_dav_url?: string }> } };
+    data?: { dms_tree?: { drive_id?: string; parent?: { item_id?: string }; children?: Array<{ item_id?: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string; web_dav_url?: string }> } };
   };
   try { json = await res.json(); } catch { console.warn('[DMS] dms_tree malformed body'); return []; }
 
@@ -244,6 +261,10 @@ export async function getDmsTree(
   if (parentItemId === undefined) {
     const rootId = json.data?.dms_tree?.parent?.item_id;
     if (typeof rootId === 'string' && rootId !== '') setRootItemId(siteId, rootId);
+    // Layer 3: capture the drive id (already in the §2.2 response) so a client view can ensure a
+    // Graph change-notification subscription for the drive.
+    const driveId = json.data?.dms_tree?.drive_id;
+    if (typeof driveId === 'string' && driveId !== '') setDriveId(siteId, driveId);
   }
 
   const children = json.data?.dms_tree?.children ?? [];

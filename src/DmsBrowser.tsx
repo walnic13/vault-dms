@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { getCachedSites, getCachedTree, getDmsTree, isNodeExpanded, listDmsSites, revalidateSiteViaDelta, setDmsPrincipal, setNodeExpanded } from './lib/dmsClient';
 import type { ShellTokenProvider, DmsClient, DmsTreeNode, DmsFileNode } from './lib/dmsClient';
-import { useDmsRealtime } from './lib/dmsRealtime';
+import { useDmsRealtime, ensureDmsSubscription } from './lib/dmsRealtime';
 
 // Best-effort OID from the access token payload — used ONLY to namespace the client-side snapshot
 // cache per authenticated principal (never for auth; the backend still validates the token). No
@@ -101,7 +101,10 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
     const nodes = await getDmsTree(siteId, itemId, getAccessToken);
     setChildren(nodes);
     setLoading(false);
-  }, [siteId, itemId, getAccessToken]);
+    // Layer 3: a client's ROOT load just captured its drive_id (via getDmsTree) — ensure a Graph
+    // change-notification subscription for that drive so SharePoint edits push (idempotent; guarded).
+    if (kind === 'client') void ensureDmsSubscription(siteId, getAccessToken);
+  }, [siteId, itemId, kind, getAccessToken]);
 
   // On (re)mount, revalidate any node restored as expanded — cached children (if any) already show,
   // this refreshes them against live SharePoint. Mount-only; expand/collapse is handled by toggle.

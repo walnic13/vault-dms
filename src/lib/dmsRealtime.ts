@@ -9,6 +9,7 @@
 // is NOT here: the caller reacts to a ping by pulling its OWN delegated dms_delta (dmsClient).
 import { useEffect } from 'react';
 import { WebPubSubClient } from '@azure/web-pubsub-client';
+import { getDriveId } from './dmsClient';
 import type { ShellTokenProvider } from './dmsClient';
 
 // Coalesce a burst of pings (e.g. a multi-file SharePoint change) into ONE revalidation.
@@ -34,6 +35,33 @@ async function negotiateDmsRealtime(getAccessToken: ShellTokenProvider): Promise
   try { json = await res.json(); } catch { return null; }
   const url = json.data?.url;
   return typeof url === 'string' && url !== '' ? url : null;
+}
+
+// Ensure a Graph change-notification subscription exists for the drive being viewed, so SharePoint
+// changes actually push. Idempotent + once-per-site guarded — `dms_subscribe` itself is idempotent
+// (returns refreshed:false when a live subscription exists); the `ensuredSites` guard avoids re-POSTing
+// on every re-expand/re-render. Fire-and-forget: all failures swallowed so a subscribe failure never
+// affects browse/delta. POSTs to func-chat (the realtime base, where dms_subscribe lives). No-op if the
+// drive id is unknown (root not loaded yet) or the realtime base is unconfigured.
+const ensuredSites = new Set<string>();
+export async function ensureDmsSubscription(siteId: string, getAccessToken: ShellTokenProvider): Promise<void> {
+  if (ensuredSites.has(siteId)) return;
+  const baseUrl = import.meta.env.VITE_DMS_REALTIME_BASE_URL;
+  if (!baseUrl) return;
+  const driveId = getDriveId(siteId);
+  if (!driveId) return;
+  const token = await getAccessToken();
+  if (!token) return;
+  try {
+    const res = await fetch(`${baseUrl}/api/dms_subscribe`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId, driveId }),
+    });
+    if (res.ok) ensuredSites.add(siteId);
+  } catch {
+    /* subscribe unavailable — browse/delta revalidation unaffected */
+  }
 }
 
 // Subscribe to DMS live-push while `active`. On a `dms_changed` ping, calls `onDmsChanged` (debounced).
