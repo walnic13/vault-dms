@@ -27,6 +27,7 @@ jobs:
         run: |
           cat > .env <<EOF
           VITE_DMS_API_BASE_URL=https://vaultgpt-func-dms.azurewebsites.net
+          VITE_DMS_REALTIME_BASE_URL=https://vaultgpt-func-chat.azurewebsites.net
           VITE_ENTRA_CLIENT_ID=${{ secrets.VITE_ENTRA_CLIENT_ID }}
           VITE_ENTRA_TENANT_ID=${{ secrets.VITE_ENTRA_TENANT_ID }}
           VITE_ENTRA_AUTHORITY=${{ secrets.VITE_ENTRA_AUTHORITY }}

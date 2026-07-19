@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { getCachedSites, getCachedTree, getDmsTree, isNodeExpanded, listDmsSites, revalidateSiteViaDelta, setDmsPrincipal, setNodeExpanded } from './lib/dmsClient';
 import type { ShellTokenProvider, DmsClient, DmsTreeNode, DmsFileNode } from './lib/dmsClient';
+import { useDmsRealtime } from './lib/dmsRealtime';
 
 // Best-effort OID from the access token payload — used ONLY to namespace the client-side snapshot
 // cache per authenticated principal (never for auth; the backend still validates the token). No
@@ -347,6 +348,12 @@ export default function DmsBrowser({ navSlot, getAccessToken, onOpenFile, pickMo
   useEffect(() => {
     if (active) setRevalidateNonce((n) => n + 1);
   }, [active]);
+
+  // Layer 3 (live push): while the DMS is the active rail context, subscribe (receive-only) to the
+  // `dms-changes` Web PubSub group; a `dms_changed` ping bumps the SAME nonce as the `active` re-show,
+  // so the existing per-expanded-site `dms_delta` patch runs and only real SharePoint changes repaint.
+  // No-ops when realtime is unconfigured (VITE_DMS_REALTIME_BASE_URL unset) or inactive.
+  useDmsRealtime(getAccessToken, !!active, useCallback(() => setRevalidateNonce((n) => n + 1), []));
 
   // Gate: hold the tree until the principal is bound (all hooks above run first — order stable).
   if (!principalReady) return navSlot ? createPortal(null, navSlot) : null;
