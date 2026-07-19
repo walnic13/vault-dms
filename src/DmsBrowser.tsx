@@ -11,7 +11,7 @@ import {
   ChevronDown, ChevronRight, Database, File, FileArchive, FileSpreadsheet, FileText,
   Folder, FolderOpen, Image, Loader2, Presentation,
 } from 'lucide-react';
-import { getCachedSites, getCachedTree, getDmsTree, isNodeExpanded, listDmsSites, setDmsPrincipal, setNodeExpanded } from './lib/dmsClient';
+import { getCachedSites, getCachedTree, getDmsTree, isNodeExpanded, listDmsSites, revalidateSiteViaDelta, setDmsPrincipal, setNodeExpanded } from './lib/dmsClient';
 import type { ShellTokenProvider, DmsClient, DmsTreeNode, DmsFileNode } from './lib/dmsClient';
 
 // Best-effort OID from the access token payload — used ONLY to namespace the client-side snapshot
@@ -36,6 +36,10 @@ function oidFromToken(token: string | null): string {
 // re-show signal that keeps the mirror live under CSS-hidden re-entry (mount stability preserved).
 // 0 = initial mount (handled by the per-component mount fetch); >0 = a genuine re-show.
 const RevalidateContext = createContext(0);
+// Layer 2: Tree bumps this AFTER it has revalidated the site(s) via dms_delta and patched the shared
+// cache. Expanded TreeNodes consume it to RE-READ their patched children from getCachedTree — no
+// per-node dms_tree refetch on re-show (the delta already fetched, once per site).
+const CacheVersionContext = createContext(0);
 
 // File-type icon decoration (UI only) from the file's OWN extension — a presentational hint, not
 // recognition/routing/taxonomy. (Ported verbatim from DmsMirror.)
@@ -87,7 +91,7 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
   const [expanded, setExpanded] = useState(() => isNodeExpanded(nodeKey));
   const [children, setChildren] = useState<DmsTreeNode[] | null>(() => getCachedTree(siteId, itemId));
   const [loading, setLoading] = useState(false);
-  const revalidateNonce = useContext(RevalidateContext);
+  const cacheVersion = useContext(CacheVersionContext);
 
   const loadChildren = useCallback(async () => {
     // Spinner only when we have nothing cached to show; otherwise the cached children stay visible
@@ -107,13 +111,13 @@ function TreeNode({ siteId, itemId, label, hasChildren, depth, kind, getAccessTo
     if (expanded) void loadChildren();
   }, [expanded, loadChildren]);
 
-  // Re-show revalidation (nonce > 0): the host re-showed the tree without a remount. If this node is
-  // expanded, refetch its children against live SharePoint and patch in place (reconciled by itemId
-  // → new/removed files appear, expanded subfolders stay). Collapsed nodes refetch lazily on expand.
+  // Re-show revalidation (Layer 2): Tree has revalidated the site via dms_delta and patched the
+  // shared cache; re-READ our children from the patched cache (new array ref → re-render). No
+  // per-node dms_tree refetch — the delta already fetched once for the whole site.
   useEffect(() => {
-    if (revalidateNonce === 0) return;
-    if (expanded) void loadChildren();
-  }, [revalidateNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (cacheVersion === 0) return;
+    setChildren(getCachedTree(siteId, itemId));
+  }, [cacheVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = useCallback(() => {
     setExpanded((prev) => {
@@ -240,6 +244,8 @@ function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder, showHeader }
   const [clients, setClients] = useState<DmsClient[] | null>(() => getCachedSites());
   const [loading, setLoading] = useState(getCachedSites() === null);
   const revalidateNonce = useContext(RevalidateContext);
+  // Bumped after a delta revalidation patches the shared cache; expanded TreeNodes re-read (below).
+  const [cacheVersion, setCacheVersion] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -249,17 +255,28 @@ function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder, showHeader }
     return () => { active = false; };
   }, [getAccessToken]);
 
-  // Re-show revalidation (nonce > 0): the host re-showed Vault Files without a remount — refetch the
-  // site list against live SharePoint and patch in place (reconciled by clientKey; no spinner, the
-  // current list stays visible). Nonce 0 is the initial mount, already covered by the effect above.
+  // Re-show revalidation (Layer 2; nonce > 0): the host re-showed Vault Files without a remount.
+  // Refetch the site list (patched by clientKey), then — per EXPANDED client site — run ONE
+  // dms_delta (revalidateSiteViaDelta) that patches the cached tree in place, instead of N per-node
+  // dms_tree re-lists. Bump cacheVersion so expanded TreeNodes re-read their patched children. Nonce
+  // 0 is the initial mount (covered above); first-load of a folder stays lazy dms_tree in TreeNode.
   useEffect(() => {
     if (revalidateNonce === 0) return;
     let active = true;
-    void listDmsSites(getAccessToken).then((list) => { if (active) setClients(list); });
+    void (async () => {
+      const list = await listDmsSites(getAccessToken);
+      if (!active) return;
+      setClients(list);
+      const expanded = list.filter((c) => isNodeExpanded(c.clientKey));
+      await Promise.all(expanded.map((c) => revalidateSiteViaDelta(c.clientKey, getAccessToken)));
+      if (!active) return;
+      setCacheVersion((v) => v + 1);
+    })();
     return () => { active = false; };
   }, [revalidateNonce, getAccessToken]);
 
   return (
+    <CacheVersionContext.Provider value={cacheVersion}>
     <div className="flex flex-col h-full min-h-0 font-sans text-theo-ink">
       {/* The browser's own header shows only when standalone; when hosted (navSlot present) the host
           shell provides the collapsible "Vault Files" section header, so we suppress this one. */}
@@ -298,6 +315,7 @@ function Tree({ getAccessToken, onOpenFile, pickMode, onPickFolder, showHeader }
         )}
       </div>
     </div>
+    </CacheVersionContext.Provider>
   );
 }
 

@@ -32,6 +32,22 @@ export interface DmsFileNode {
 
 export type DmsTreeNode = DmsFolderNode | DmsFileNode;
 
+// Layer 2 — one changed DriveItem from dms_delta (§2.7). `deleted` items carry only item_id +
+// parent_id; present items mirror the dms_tree projection so the client can patch its cached tree.
+export interface DmsDeltaChange {
+  item_id: string;
+  parent_id: string | null;
+  deleted: boolean;
+  type?: 'folder' | 'file';
+  name?: string;
+  size?: number | null;
+  date_modified?: string | null;
+  web_url?: string | null;
+  has_children?: boolean;
+  mime_type?: string | null;
+  web_dav_url?: string | null;
+}
+
 // Stale-while-revalidate snapshot (Walter 2026-07-19; Layer 1). The DMS is a LIVE mirror of
 // SharePoint, so the browse functions below ALWAYS fetch fresh — nothing here serves stale data as
 // authoritative. This last-known snapshot exists ONLY so a host can paint the previously-loaded
@@ -72,7 +88,7 @@ function ssSet(key: string, val: unknown): void {
 function ssClear(): void {
   if (!principal) return;
   try {
-    for (const k of ['sites', 'tree', 'expanded']) sessionStorage.removeItem(ssKey(k));
+    for (const k of ['sites', 'tree', 'expanded', 'deltaTokens', 'rootItemIds']) sessionStorage.removeItem(ssKey(k));
   } catch {
     /* ignore */
   }
@@ -85,6 +101,12 @@ const treeKey = (siteId: string, parentItemId?: string) => `${siteId}|${parentIt
 let sitesCache: DmsClient[] | null = null;
 const treeCache = new Map<string, DmsTreeNode[]>();
 const expandedNodes = new Set<string>();
+// Layer 2: per-site opaque delta cursor (Graph deltaLink, round-tripped) + per-site drive root item
+// id (the §2.2 dms_tree.parent.item_id — the SOLE contract-grounded source, used to map delta
+// parent_id === root to the FE root cache key). Both are "metadata + delta cursor" per the DMS
+// Snapshot Storage Exception (Governor §6.3); persisted per-principal like the rest of the snapshot.
+const deltaTokens = new Map<string, string>();
+const rootItemIds = new Map<string, string>();
 
 // Bind the cache to the authenticated principal (OID). On a new/first-seen principal, re-hydrate the
 // in-memory snapshot from THAT principal's sessionStorage namespace (empty for a first-seen user) —
@@ -98,6 +120,10 @@ export function setDmsPrincipal(id: string): void {
   for (const [k, v] of ssGet<[string, DmsTreeNode[]][]>('tree') ?? []) treeCache.set(k, v);
   expandedNodes.clear();
   for (const n of ssGet<string[]>('expanded') ?? []) expandedNodes.add(n);
+  deltaTokens.clear();
+  for (const [k, v] of ssGet<[string, string][]>('deltaTokens') ?? []) deltaTokens.set(k, v);
+  rootItemIds.clear();
+  for (const [k, v] of ssGet<[string, string][]>('rootItemIds') ?? []) rootItemIds.set(k, v);
 }
 
 // Synchronous last-known snapshot for instant first paint (null ⇒ never loaded).
@@ -116,6 +142,27 @@ export function setNodeExpanded(nodeKey: string, expanded: boolean): void {
   if (expanded) expandedNodes.add(nodeKey);
   else expandedNodes.delete(nodeKey);
   ssSet('expanded', [...expandedNodes]);
+}
+
+// Layer 2 — per-site delta cursor.
+export function getDeltaToken(siteId: string): string | null {
+  return deltaTokens.get(siteId) ?? null;
+}
+export function setDeltaToken(siteId: string, token: string | null): void {
+  if (token) deltaTokens.set(siteId, token);
+  else deltaTokens.delete(siteId);
+  ssSet('deltaTokens', [...deltaTokens]);
+}
+// Layer 2 — per-site drive root item id (the §2.2 dms_tree.parent.item_id). SOLE source for mapping
+// a delta change whose parent_id === root to the FE root cache key.
+export function getRootItemId(siteId: string): string | null {
+  return rootItemIds.get(siteId) ?? null;
+}
+export function setRootItemId(siteId: string, itemId: string): void {
+  if (itemId) {
+    rootItemIds.set(siteId, itemId);
+    ssSet('rootItemIds', [...rootItemIds]);
+  }
 }
 
 export function clearDmsCache(): void {
@@ -187,9 +234,17 @@ export async function getDmsTree(
   if (!res.ok) { console.warn(`[DMS] dms_tree returned ${res.status}`); return []; }
 
   let json: {
-    data?: { dms_tree?: { children?: Array<{ item_id?: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string; web_dav_url?: string }> } };
+    data?: { dms_tree?: { parent?: { item_id?: string }; children?: Array<{ item_id?: string; name?: string; type?: string; has_children?: boolean; web_url?: string; mime_type?: string; web_dav_url?: string }> } };
   };
   try { json = await res.json(); } catch { console.warn('[DMS] dms_tree malformed body'); return []; }
+
+  // Layer 2 root reconciliation: on a ROOT call (no parentItemId), record the drive root item id
+  // (§2.2-guaranteed dms_tree.parent.item_id) — the SOLE source used to map delta parent_id === root
+  // to the FE root cache key.
+  if (parentItemId === undefined) {
+    const rootId = json.data?.dms_tree?.parent?.item_id;
+    if (typeof rootId === 'string' && rootId !== '') setRootItemId(siteId, rootId);
+  }
 
   const children = json.data?.dms_tree?.children ?? [];
   const mapped = children
@@ -202,4 +257,117 @@ export async function getDmsTree(
   treeCache.set(treeKey(siteId, parentItemId), mapped); // SWR snapshot: successful fetch only
   ssSet('tree', [...treeCache]);
   return mapped;
+}
+
+// Folders first, then files, alphabetical within each (mirrors dms_tree's server order so a patched
+// folder stays pixel-identical to a freshly-listed one).
+function sortTreeNodes(nodes: DmsTreeNode[]): void {
+  nodes.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
+    const n = a.name.localeCompare(b.name);
+    return n !== 0 ? n : a.itemId.localeCompare(b.itemId);
+  });
+}
+
+// GET dms_delta (§2.7) — siteId + optional opaque cursor. Returns changed DriveItems + a fresh
+// cursor; no cursor ⇒ full baseline. null on ANY non-2xx (incl. expired-token 410→500) so the
+// caller drops its cursor and re-baselines. Delegated OBO → per-user trimming, same as dms_tree.
+export async function getDmsDelta(
+  siteId: string,
+  deltaToken: string | null,
+  getAccessToken: ShellTokenProvider,
+): Promise<{ baseline: boolean; changes: DmsDeltaChange[]; deltaToken: string | null } | null> {
+  const baseUrl = dmsApiBase();
+  if (!baseUrl) return null;
+  const token = await getAccessToken();
+  if (!token) { console.warn('[DMS] no access token — cannot get delta'); return null; }
+
+  const params = new URLSearchParams({ siteId });
+  if (deltaToken) params.set('deltaToken', deltaToken);
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/dms_delta?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
+  } catch (e) {
+    console.warn('[DMS] dms_delta request failed', e);
+    return null;
+  }
+  if (!res.ok) { console.warn(`[DMS] dms_delta returned ${res.status}`); return null; }
+
+  let json: { data?: { dms_delta?: { baseline?: boolean; changes?: DmsDeltaChange[]; delta_token?: string | null } } };
+  try { json = await res.json(); } catch { console.warn('[DMS] dms_delta malformed body'); return null; }
+
+  const d = json.data?.dms_delta;
+  if (!d) return null;
+  return {
+    baseline: !!d.baseline,
+    changes: Array.isArray(d.changes) ? d.changes : [],
+    deltaToken: typeof d.delta_token === 'string' ? d.delta_token : null,
+  };
+}
+
+// Patch the cached tree in place from a delta change set. Each change's parent cache key: parent_id
+// === the drive root item id ⇒ the FE root key (parentItemId undefined); else the parent folder.
+// Only folders already in the cache are patched (unloaded folders lazy-load fresh). Copy-on-write
+// per touched folder so getCachedTree returns a NEW array reference → consumers re-render.
+export function applyDeltaToCache(siteId: string, changes: DmsDeltaChange[]): void {
+  if (!changes.length) return;
+  const rootId = getRootItemId(siteId);
+  const touched = new Map<string, DmsTreeNode[]>();
+  const working = (key: string): DmsTreeNode[] | null => {
+    if (!touched.has(key)) {
+      const cur = treeCache.get(key);
+      if (!cur) return null;
+      touched.set(key, cur.slice());
+    }
+    return touched.get(key)!;
+  };
+
+  for (const c of changes) {
+    if (!c || typeof c.item_id !== 'string' || c.item_id === '') continue;
+    const parentKey =
+      c.parent_id && rootId && c.parent_id === rootId
+        ? treeKey(siteId, undefined)
+        : c.parent_id
+          ? treeKey(siteId, c.parent_id)
+          : null;
+    if (!parentKey) continue; // the drive root item itself (parent_id null) is not a tree node
+    const list = working(parentKey);
+    if (!list) continue; // parent folder not loaded — ignored (lazy-loads fresh on first expand)
+
+    const idx = list.findIndex((n) => n.itemId === c.item_id);
+    if (c.deleted) {
+      if (idx >= 0) list.splice(idx, 1);
+      continue;
+    }
+    const node: DmsTreeNode =
+      c.type === 'file'
+        ? { kind: 'file', itemId: c.item_id, name: c.name ?? '(unnamed file)', webUrl: c.web_url ?? '', mimeType: c.mime_type ?? undefined, webDavUrl: c.web_dav_url ?? undefined }
+        : { kind: 'folder', itemId: c.item_id, name: c.name ?? '(unnamed folder)', hasChildren: !!c.has_children };
+    if (idx >= 0) list[idx] = node;
+    else list.push(node);
+  }
+
+  if (touched.size === 0) return;
+  for (const [key, list] of touched) {
+    sortTreeNodes(list);
+    treeCache.set(key, list);
+  }
+  ssSet('tree', [...treeCache]);
+}
+
+// Revalidate one site incrementally. Contract-safe root bootstrap: rootItemId's only source is the
+// §2.2 dms_tree.parent.item_id, so if unknown, refresh root first (also refreshes the root listing).
+// Then apply the delta and store the fresh cursor; any non-2xx drops the cursor to re-baseline next.
+export async function revalidateSiteViaDelta(siteId: string, getAccessToken: ShellTokenProvider): Promise<void> {
+  if (getRootItemId(siteId) === null) {
+    await getDmsTree(siteId, undefined, getAccessToken);
+  }
+  const resp = await getDmsDelta(siteId, getDeltaToken(siteId), getAccessToken);
+  if (!resp) {
+    setDeltaToken(siteId, null);
+    return;
+  }
+  applyDeltaToCache(siteId, resp.changes);
+  setDeltaToken(siteId, resp.deltaToken);
 }
