@@ -7,7 +7,7 @@ Plan-only VEP. Layers 1 + the SWR/re-show signal are live: the DMS tree paints i
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: 0898dae8b94f0ecb65a3e76fc288573bc54c1745 (development; the commit that first adds this VEP — T25 presence probe resolves here and at every later commit; grounding reads were against parent d8bba5c)
+Turn issued against HEAD: 3f349a1e57c50be624dc64525b4204c8dd6f139b (development; the commit that first adds this VEP — T25 presence probe resolves here and at every later commit; grounding reads were against parent d8bba5c)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
