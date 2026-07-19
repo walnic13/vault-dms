@@ -44,7 +44,7 @@ Sub-phase Track: P5
 - **New external Graph interaction (Golden Handler §4 / T12):** `/drives/{id}/root/delta` is not called by any deployed handler → authorized verbatim by Walter (above). All other Graph calls (`/sites/{id}/drive` site→drive resolution) mirror `reporting_dms_tree` EXACT.
 - **Delegated OBO as the signed-in user (Conformance §6 T40):** every Graph call is OBO; no application-permission read; no `reporting_*`/`theo_*` table.
 - **Files AND folders (architecture §3):** the change projection maps both `item.folder` and `item.file`, mirroring the §2.2 field set; `deleted` items carry `{ item_id, parent_id, deleted:true }`.
-- **Resync (Graph 410):** an expired/invalid delta token → Graph 410 → the handler returns `410 RESYNC_REQUIRED` so the client drops its token and re-baselines (no hard failure).
+- **Error taxonomy — EXACT mirror of `reporting_dms_tree` (API Spec §1; no new error contract):** a delegated Graph 403/404 ANYWHERE — the `/sites/{id}/drive` resolution OR the delta pagination loop — maps to route **404** (existence-disclosure-safe); no route returns 403. `graphGetJson` keeps the reference's identical 403→FORBIDDEN / 404→NOT_FOUND / else→500 mapping (no new error-to-status mapping). Any other Graph failure — including an expired/invalid delta token (Graph 410) — falls to the generic **500**. Token expiry needs no distinct error contract: the client treats any `dms_delta` non-2xx as "drop the token and re-baseline" (call with no token).
 
 ## Gap Register
 
@@ -59,7 +59,7 @@ Sub-phase Track: P5
 | Route | `GET /api/dms_delta?siteId=<10..200, no % or _>&deltaToken=<optional opaque, [A-Za-z0-9._~=+-], ≤4000>` |
 | Purpose | Return the DriveItems changed (added/renamed/moved/removed) since the caller's `deltaToken`, plus a fresh token; no token ⇒ full baseline. Cheap incremental refresh so a host patches its cached tree in place instead of re-listing (Layer 2 of the live-mirror plan). |
 | Success | `{ data: { dms_delta: { site_id, drive_id, baseline, changes: [ { item_id, parent_id, deleted, type?:"folder"\|"file", name?, size?, date_modified?, web_url?, has_children? (folders), mime_type?/web_dav_url? (files) } ], delta_token } } }` |
-| Errors | 400 invalid siteId/deltaToken; 401 EasyAuth/OBO; 404 site not accessible; 410 `RESYNC_REQUIRED` (token expired → re-baseline); 500 OBO config. |
+| Errors | 400 invalid siteId/deltaToken; 401 EasyAuth/OBO; 404 site/drive not accessible (delegated Graph 403/404 → 404, existence-disclosure-safe); 500 other (incl. expired delta token → Graph 410). The client treats any non-2xx as drop-token-and-re-baseline. |
 | Primary reference | `reporting_dms_tree` (OBO + `/sites/{id}/drive` resolution + `@odata.nextLink` pagination). **Delta:** the Graph `/drives/{id}/root/delta` endpoint (Walter-authorized 2026-07-19); client-held opaque token (stateless); SSRF-safe server-reconstructed URL. |
 | Status | `proposed` |
 ```
@@ -88,11 +88,11 @@ No other gaps: stateless; depends on no unlanded prerequisite (the app + OBO/Eas
 | Handler region (`handlers/dms_delta/index.js`) | Primary reference region | Classification | Basis |
 | --- | --- | --- | --- |
 | `require("https")`, corsHeaders, `SITE_ID_*` constants, `isValidSiteIdFormat`, `send`/`nowIso`/`errorBody`/`successBody`/`getPrincipal`/`getClaimValue`/`buildKnownError`/`parseJsonSafe`/`requestUrl`/`getBearerTokenFromAuthorization`/`getOboInputToken`/`exchangeGraphToken` | same | EXACT | frozen Family-B helper block (copied verbatim from deployed `dms_tree`) |
-| `graphGetJson` | same | ALLOWED DELTA | adds a distinct `410 → RESYNC_REQUIRED` mapping (delta-token expiry) atop the identical 403/404/500 mapping |
+| `graphGetJson` | same | EXACT | identical 403→FORBIDDEN / 404→NOT_FOUND / else→500 mapping — no new error-to-status contract |
 | oid + oboInput extraction, siteId validation | same | EXACT | reference validation preserved |
 | `DELTA_TOKEN_*` + `isValidDeltaTokenFormat`, `extractTokenParam` | (none) | ALLOWED DELTA | new bounded/SSRF-safe token validation + token-only extraction (never fetch a client URL) |
 | `/sites/{siteId}/drive` site→drive resolution | same Graph endpoint | EXACT | Golden Handler §4 (same endpoint) |
-| `/drives/{driveId}/root/delta[?token=]` paginated loop + `mapDeltaItem` | (none) | ALLOWED DELTA (Walter-authorized new endpoint) | Golden Handler §4 / T12 — verbatim authorization above; projection mirrors §2.2 fields + `deleted`/`parent_id` |
+| `/drives/{driveId}/root/delta[?token=]` paginated loop + `mapDeltaItem`, wrapped so a delegated 403/404 → route 404 | (none) | ALLOWED DELTA (Walter-authorized new endpoint) | Golden Handler §4 / T12 — verbatim authorization above; projection mirrors §2.2 fields + `deleted`/`parent_id`; 403/404→404 mirrors `dms_tree`'s existence-disclosure-safe taxonomy (no new error contract) |
 | response `{ dms_delta: { site_id, drive_id, baseline, changes, delta_token } }` | `{ dms_tree: { … } }` | ALLOWED DELTA | new contract per §2.7; same envelope/`successBody` shape |
 | `pg`/`Pool`/DB/registry | present in monolith reference | **REMOVED (stateless)** | Golden Handler §3; no-DB; DR-D2 |
 
@@ -107,7 +107,7 @@ curl -sS -G -w '\nHTTP %{http_code}\n' \
   -H "Authorization: Bearer $TOKEN" -H "x-ms-token-aad-access-token: $TOKEN"
 ```
 
-Assertion: HTTP 200; body `{ data: { dms_delta: { site_id, drive_id, baseline:true, changes:[…], delta_token:"<opaque>" } }, meta:{…} }`; each non-deleted change carries `item_id, parent_id, type` (+ `name` etc.); `delta_token` present + non-empty. A second call with `--data-urlencode "deltaToken=<that token>"` returns `baseline:false` + (typically empty) `changes` + a fresh token. 400 invalid input; 401 EasyAuth/OBO; 404 site; 410 resync; 500 OBO config. Token never printed.
+Assertion: HTTP 200; body `{ data: { dms_delta: { site_id, drive_id, baseline:true, changes:[…], delta_token:"<opaque>" } }, meta:{…} }`; each non-deleted change carries `item_id, parent_id, type` (+ `name` etc.); `delta_token` present + non-empty. A second call with `--data-urlencode "deltaToken=<that token>"` returns `baseline:false` + (typically empty) `changes` + a fresh token. 400 invalid input; 401 EasyAuth/OBO; 404 site/drive not accessible (delegated 403/404); 500 other (incl. expired-token Graph 410). Token never printed. The FE (Layer-2 client) treats any non-2xx as drop-token-and-re-baseline.
 
 ## Parity checklist (Golden Handler §5.4)
 

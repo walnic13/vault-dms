@@ -195,9 +195,6 @@ async function graphGetJson(url, accessToken) {
 
   if (r.statusCode === 403) throw buildKnownError("FORBIDDEN", graphMessage, 403);
   if (r.statusCode === 404) throw buildKnownError("NOT_FOUND", graphMessage, 404);
-  // A delta token that is expired/invalid → Graph 410 Gone (resyncRequired). Surface it distinctly
-  // so the caller drops its token and does a full re-list (delta reset), not a hard failure.
-  if (r.statusCode === 410) throw buildKnownError("RESYNC_REQUIRED", graphMessage, 410);
   throw buildKnownError("INTERNAL_SERVER_ERROR", graphMessage, 500);
 }
 
@@ -339,27 +336,38 @@ module.exports = async function (context, req) {
 
     // Page through @odata.nextLink; the final page carries @odata.deltaLink (the next cursor). We
     // reconstruct each subsequent page URL from the extracted token too (never fetch the raw link).
-    while (nextUrl) {
-      const page = await graphGetJson(nextUrl, graphToken);
+    // Existence-disclosure-safe (API Spec §1): a delegated Graph 403/404 anywhere in the loop —
+    // including an inaccessible drive or an expired/invalid delta token (410 falls through to the
+    // generic known-error path) — maps to route 404, mirroring dms_tree's taxonomy. The client
+    // treats any dms_delta non-2xx as "drop the token and re-baseline" (call with no token).
+    try {
+      while (nextUrl) {
+        const page = await graphGetJson(nextUrl, graphToken);
 
-      const items = Array.isArray(page.value) ? page.value : [];
-      for (const raw of items) {
-        const mapped = mapDeltaItem(raw);
-        if (mapped) changes.push(mapped);
+        const items = Array.isArray(page.value) ? page.value : [];
+        for (const raw of items) {
+          const mapped = mapDeltaItem(raw);
+          if (mapped) changes.push(mapped);
+        }
+
+        const nextLink = typeof page["@odata.nextLink"] === "string" ? page["@odata.nextLink"] : "";
+        const deltaLink = typeof page["@odata.deltaLink"] === "string" ? page["@odata.deltaLink"] : "";
+
+        if (nextLink) {
+          const t = extractTokenParam(nextLink);
+          nextUrl = t
+            ? `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root/delta?token=${encodeURIComponent(t)}`
+            : null;
+        } else {
+          newToken = extractTokenParam(deltaLink);
+          nextUrl = null;
+        }
       }
-
-      const nextLink = typeof page["@odata.nextLink"] === "string" ? page["@odata.nextLink"] : "";
-      const deltaLink = typeof page["@odata.deltaLink"] === "string" ? page["@odata.deltaLink"] : "";
-
-      if (nextLink) {
-        const t = extractTokenParam(nextLink);
-        nextUrl = t
-          ? `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root/delta?token=${encodeURIComponent(t)}`
-          : null;
-      } else {
-        newToken = extractTokenParam(deltaLink);
-        nextUrl = null;
+    } catch (err) {
+      if (err && (err.code === "FORBIDDEN" || err.code === "NOT_FOUND")) {
+        return send(context, 404, errorBody("NOT_FOUND", "Client site not found.", 404));
       }
+      throw err;
     }
 
     return send(
@@ -378,11 +386,6 @@ module.exports = async function (context, req) {
     );
   } catch (err) {
     context.log.error("dms_delta failed", err);
-
-    if (err && err.code === "RESYNC_REQUIRED") {
-      // Expired/invalid delta token → the caller must drop it and re-baseline (call with no token).
-      return send(context, 410, errorBody("RESYNC_REQUIRED", "Delta token expired; full resync required.", 410));
-    }
 
     if (err && err.isKnown === true && typeof err.status === "number" && typeof err.code === "string") {
       return send(context, err.status, errorBody(err.code, err.message, err.status));
