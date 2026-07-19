@@ -14,7 +14,7 @@ Scope: **vault-dms** `src/lib/dmsClient.ts` + `src/DmsBrowser.tsx` (adds `active
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: c04f773345a0c2efcf603fe54f7ba534cd65a1fb (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit; grounding reads were against parent 58a810d)
+Turn issued against HEAD: 30d81301cf9bbe873acb3368eb72f49c9b28fc09 (development; the commit that carries this rev2 VEP — T25 artifact-presence probe resolves there and at every later commit; grounding reads were against parent 58a810d; supersedes rev1 at c04f773)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
