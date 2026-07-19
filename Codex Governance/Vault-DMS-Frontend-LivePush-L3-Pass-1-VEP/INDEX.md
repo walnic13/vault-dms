@@ -7,7 +7,7 @@ Plan-only VEP. Layers 1 (instant paint) + 2 (delta patch) are live: the DMS tree
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: 782cbd8298d14abf6598797887364fcfc9573160
+Turn issued against HEAD: 7e4803acc69ca6d1fc892cb318a321797ebcf66c (development; the commit that first adds this VEP — presence probe resolves here and at every later commit; grounding reads were against parent 782cbd8)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
