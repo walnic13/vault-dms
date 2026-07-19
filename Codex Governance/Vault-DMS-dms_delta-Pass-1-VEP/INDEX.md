@@ -7,7 +7,7 @@ Controlling artifact for Codex review. Self-contained: handler under `handlers/`
 ```
 Role: Claude Code
 Turn Type: Verified Evidence Pack (backend plan)
-Turn issued against HEAD: 43984cf8a41f61e2a4304bd3b29e09f9a972fc71 (development; the commit that first adds this package — T29 artifact-presence probe resolves here and at every later commit; grounding reads were against parent 497b4fd)
+Turn issued against HEAD: 81febd3e050a899bfffb7ce252c710feb81c034f (development; the commit that first adds this package — T29 artifact-presence probe resolves here and at every later commit; grounding reads were against parent 497b4fd)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: P5
