@@ -7,7 +7,7 @@ Plan-only VEP. The Codex-APPROVED live-mirror change (`…-LiveMirror-StaleWhile
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: <<PKG_COMMIT>> (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit; grounding reads were against parent c131111)
+Turn issued against HEAD: 76219dffd51f2d8b44c59af31b7685159736d8a1 (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit; grounding reads were against parent c131111)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
