@@ -7,7 +7,7 @@ Plan-only VEP. Today every time a host hides and re-shows the DMS tree (e.g. the
 ```
 Role: Claude Code
 Turn Type: Pass 1 — Frontend Verified Evidence Pack
-Turn issued against HEAD: <<PKG_COMMIT>> (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit; grounding reads were against parent 58a810d)
+Turn issued against HEAD: c04f773345a0c2efcf603fe54f7ba534cd65a1fb (development; the commit that first adds this VEP — T25 artifact-presence probe resolves there and at every later commit; grounding reads were against parent 58a810d)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 1
 Sub-phase Track: N/A
