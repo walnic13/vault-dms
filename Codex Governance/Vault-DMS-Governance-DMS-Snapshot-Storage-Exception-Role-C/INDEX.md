@@ -7,7 +7,7 @@ Walter authorized (2026-07-19) a **scoped browser-storage exception** for the pr
 ```
 Role: Claude Code
 Turn Type: Pass 4 — Documentation-update (Role-C authority amendment)
-Turn issued against HEAD: <<PKG_COMMIT>> (development; the commit that lands this amendment + package; grounding reads were against parent 79e7e8a)
+Turn issued against HEAD: 99c13193d15db16538b86d19128d159bbe6d5410 (development; the commit that lands this amendment + package; grounding reads were against parent 79e7e8a)
 Grounding Mode: Full Baseline Grounding
 Pass: Pass 4
 Sub-phase Track: N/A
